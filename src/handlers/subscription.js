@@ -26,7 +26,7 @@ export async function handleSubscriptionRequest(request, token) {
 
   await TelegramService.sendSubscriptionLog(request, group.name);
   
-  const { content, headers } = await SubconverterService.generateSubscription(group.nodes, group.filter, request);
+  const { content, headers } = await SubconverterService.generateSubscription(group, request, token);
 
   return new Response(content, { headers });
 }
