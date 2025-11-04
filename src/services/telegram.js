@@ -1,7 +1,7 @@
 import { ConfigService } from './config.js';
 
 export class TelegramService {
-  static async sendMessage(message) {
+  static async sendMessage(message, ctx = null) {
     const config = ConfigService.get('telegram');
     if (!config.enabled || !config.botToken || !config.chatId) {
       return;
@@ -18,22 +18,31 @@ export class TelegramService {
     const options = {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json; charset=UTF-8'
       },
       body: JSON.stringify(payload)
     };
 
-    try {
-      // 使用 ctx.waitUntil 避免阻塞响应
-      const ctx = ConfigService.getCtx();
-      if (ctx) {
-        ctx.waitUntil(fetch(url, options));
-      } else {
-        await fetch(url, options);
+    const sendTelegram = async () => {
+      try {
+        console.log('Sending Telegram message:', message);
+        const response = await fetch(url, options);
+        console.log('Telegram response status:', response.status);
+        if (!response.ok) {
+          throw new Error(`Telegram API returned ${response.status}: ${await response.text()}`);
+        }
+        console.log('Telegram message sent successfully');
+      } catch (err) {
+        console.error('Telegram send failed:', err.message);
       }
-    } catch (error) {
-      // 如果TG发送失败，我们只能在控制台记录，避免循环依赖
-      console.error('Telegram send failed:', JSON.stringify(error));
+    };
+
+    // 如果有 ctx，使用 waitUntil 确保请求完成
+    if (ctx && ctx.waitUntil) {
+      ctx.waitUntil(sendTelegram());
+    } else {
+      // 否则直接发送（可能在某些情况下失败）
+      await sendTelegram();
     }
   }
 }

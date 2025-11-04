@@ -13,17 +13,17 @@ async function handleLogin(request, logger) {
 	const jwtSecret = ConfigService.getEnv().JWT_SECRET;
 
 	if (!adminPassword || !jwtSecret) {
-		logger.fatal('Admin password or JWT secret not set on server.', { url: request.url, notify: true });
+		logger.fatal('Admin password or JWT secret not set on server.');
 		return response.json({ error: 'Admin password or JWT secret not set on server.' }, 500);
 	}
 
 	if (password === adminPassword) {
 		const token = await createJwt(jwtSecret);
 		const cookie = createAuthCookie(token, 8 * 60 * 60); // 8 hours
-		logger.info('Admin logged in', { url: request.url }, { notify: true });
+		logger.info('Admin logged in', {}, { notify: true });
 		return response.json({ success: true }, 200, { 'Set-Cookie': cookie });
 	} else {
-		logger.warn('Admin login attempt failed', { url: request.url }, { notify: true });
+		logger.warn('Admin login attempt failed', {}, { notify: true });
 		return response.json({ error: 'Invalid password' }, 401);
 	}
 }
@@ -64,7 +64,7 @@ async function handleApiRequest(request, url, logger) {
 		const newGroup = await request.json();
 		if (!newGroup.token) newGroup.token = generateToken();
 		await KVService.saveGroup(newGroup);
-		logger.info(`Group created, name: ${newGroup.name}`, {}, { notify: true });
+		logger.info(`Group created`, { GroupName: newGroup.name, Token: newGroup.token }, { notify: true });
 		return response.json(newGroup);
 	}
 	if (pathParts[2] === 'groups' && pathParts[3] && method === 'PUT') {
@@ -72,13 +72,13 @@ async function handleApiRequest(request, url, logger) {
 		const groupData = await request.json();
 		groupData.token = token;
 		await KVService.saveGroup(groupData);
-		logger.info(`Group updated, name: ${groupData.name}`, {}, { notify: true });
+		logger.info(`Group updated`, { GroupName: groupData.name, Token: groupData.token }, { notify: true });
 		return response.json(groupData);
 	}
 	if (pathParts[2] === 'groups' && pathParts[3] && method === 'DELETE') {
 		const token = pathParts[3];
 		await KVService.deleteGroup(token);
-		logger.info(`Group deleted, token: ${token}`, {}, { notify: true });
+		logger.warn(`Group deleted`, { Token: token }, { notify: true });
 		return response.json({ success: true });
 	}
 	if (pathParts[2] === 'utils' && pathParts[3] === 'gentoken' && method === 'GET') {

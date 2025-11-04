@@ -40,7 +40,7 @@ export default class LoggerService {
    * @param {string} message 日志消息
    * @param {object} [data={}] 附加数据
    */
-  _log(level, message, data = {}, options = {}) {
+  async _log(level, message, data = {}, options = {}) {
     const levelNumber = logLevels[level];
 
     // 条件检查：
@@ -62,13 +62,14 @@ export default class LoggerService {
         method: this.request.method,
         colo: this.request.cf?.colo,
         country: this.request.cf?.country,
+        region: this.request.cf?.region,
       },
       // 合并任何提供的自定义数据
       ...data,
     };
 
     if (options.notify || level === 'error' || level === 'fatal') {
-      this.sendNotification(logObject, data);
+      await this.sendNotification(logObject, data, this.request);
     }
 
     // 使用不同的控制台方法。这有助于在某些日志查看器中进行过滤
@@ -94,7 +95,7 @@ export default class LoggerService {
    * 格式化并发送Telegram通知
    * @private
    */
-  sendNotification(logObject, data) {
+  async sendNotification(logObject, data, request) {
     const { level, message, context } = logObject;
     const emoji = {
         INFO: 'ℹ️',
@@ -117,20 +118,23 @@ export default class LoggerService {
     
     const msg = [
         `<b>${emoji} [${level}] ${message}</b>`,
-        `URL: ${context.url}`,
-        `IP: ${context.country} (${context.colo})`,
+        `Timestamp: ${logObject.timestamp}`,
+        // `URL: ${context.url}`,
+        `IP: ${request.headers.get('cf-connecting-ip')|| 'N/A'}`,
+        `Country: ${context.country} (${context.colo})`,
+        `Region: ${context.region}`,
         details
     ].filter(Boolean).join('\n');
 
-    TelegramService.sendMessage(msg);
+    await TelegramService.sendMessage(msg, this.ctx);
   }
 
   // Public-facing log methods
-  debug(message, data, options) { this._log('debug', message, data, options); }
-  info(message, data, options) { this._log('info', message, data, options); }
-  warn(message, data, options) { this._log('warn', message, data, options); }
+  async debug(message, data, options) { this._log('debug', message, data, options); }
+  async info(message, data, options) { this._log('info', message, data, options); }
+  async warn(message, data, options) { this._log('warn', message, data, options); }
 
-  error(message, data) {
+  async error(message, data) {
     // 如果 message 是一个 Error 对象，则将其转换为可记录的对象
     if (message instanceof Error) {
         const errorData = {
@@ -147,5 +151,5 @@ export default class LoggerService {
     }
   }
   
-  fatal(message, data, options) { this._log('fatal', message, data, options); }
+  async fatal(message, data, options) { this._log('fatal', message, data, options); }
 }
