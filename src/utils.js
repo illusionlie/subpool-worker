@@ -129,9 +129,16 @@ export const response = {
  * @returns {boolean}
  */
 export function isValidBase64(str) {
-  if (!str || typeof str !== 'string') return false;
-  const cleanStr = str.replace(/\s/g, '');
-  return /^[A-Za-z0-9+/=]+$/.test(cleanStr) && cleanStr.length % 4 === 0;
+  if (typeof str !== 'string') return false;
+  if (str.length === 0) return true; // 空字符串是有效的 Base64
+  
+  const cleanStr = str.replace(/\s+/g, '');
+
+  // 空字符串检查（清理后可能为空）
+  if (len === 0) return false;
+  if (len % 4 !== 0) return false;
+
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(cleanStr);
 }
 
 /**
