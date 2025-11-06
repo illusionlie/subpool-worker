@@ -2,7 +2,7 @@ import { ConfigService } from '../services/config.js';
 import { KVService } from '../services/kv.js';
 import { renderAdminPage } from '../views/admin.html.js';
 import { renderLoginPage } from '../views/login.html.js';
-import { response, generateToken } from '../utils.js';
+import { response } from '../utils.js';
 import { verifyJwt, createJwt, refreshJwt, getAuthCookie, createAuthCookie } from '../services/auth.js';
 import { Router } from 'itty-router';
 
@@ -78,7 +78,7 @@ async function handleApiRequest(request, url, logger) {
       return response.json({ error: 'Group already exists' }, 400);
     }
 
-    if (!newGroup.token) newGroup.token = generateToken();
+    if (!newGroup.token) newGroup.token = crypto.randomUUID();
 		await KVService.saveGroup(newGroup);
 		logger.info(`Group created`, { GroupName: newGroup.name, Token: newGroup.token }, { notify: true });
 		return response.json(newGroup);
@@ -103,7 +103,7 @@ async function handleApiRequest(request, url, logger) {
   });
 
   // 生成新token
-  router.get('/admin/api/utils/gentoken', () => response.json({ token: generateToken() }));
+  router.get('/admin/api/utils/gentoken', () => response.json({ token: crypto.randomUUID() }));
 
   const routerResponse = await router.fetch(request);
   if (routerResponse) return routerResponse;

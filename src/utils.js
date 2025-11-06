@@ -72,10 +72,6 @@ export const response = {
   }
 }
 
-export function generateToken() {
-  return crypto.randomUUID();
-}
-
 /**
  * Checks if a string is a valid Base64 string.
  * @param {string} str - The string to check.
