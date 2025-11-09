@@ -21,6 +21,12 @@ const DEFAULT_CONFIG = {
     protocol: 'https',
     configUrl: 'https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_MultiCountry.ini',
   },
+  failedBan: {
+    enabled: false,
+    maxAttempts: 5,
+    banDuration: 600, // 10 minutes
+    failedAttemptsTtl: 600, // 10 minutes
+  },
 };
 
 let _config = null;
@@ -39,6 +45,7 @@ export class ConfigService {
       telegram: { ...DEFAULT_CONFIG.telegram, ...kvConfig.telegram },
       subconverter: { ...DEFAULT_CONFIG.subconverter, ...kvConfig.subconverter },
       subscriptionInfo: { ...DEFAULT_CONFIG.subscriptionInfo, ...kvConfig.subscriptionInfo },
+      failedBan: { ...DEFAULT_CONFIG.failedBan, ...kvConfig.failedBan },
     };
   }
 

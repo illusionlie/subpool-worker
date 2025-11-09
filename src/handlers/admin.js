@@ -11,6 +11,7 @@ async function handleLogin(request, logger) {
 	const { password } = await request.json();
 	const adminPassword = ConfigService.get('adminPassword');
 	const jwtSecret = ConfigService.getEnv().JWT_SECRET;
+  const failedBan = ConfigService.get('failedBan');
 
 	if (!adminPassword || !jwtSecret) {
 		logger.fatal('Admin password or JWT secret not set on server.');
@@ -23,6 +24,28 @@ async function handleLogin(request, logger) {
 		logger.info('Admin logged in', {}, { notify: true });
 		return response.json({ success: true }, 200, { 'Set-Cookie': cookie });
 	} else {
+    // 失败登录记录，防止暴力破解
+    if (failedBan.enabled) {
+      const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || 'unknown';
+
+      // 检查是否被ban
+      const banned = await KVService.get(`banned::${ip}`);
+      if (banned) {
+        logger.warn('Banned IP attempted login', {}, { notify: true });
+        return response.json({ error: 'Too many failed attempts, please try again later.' }, 429);
+      }
+
+      // 检查失败次数
+      const attempts = await KVService.get(`failedAttempts::${ip}`) || 0;
+      if (attempts >= failedBan.maxAttempts) {
+        await KVService.put(`banned::${ip}`, true, { expirationTtl: failedBan.banDuration });
+        logger.warn('Banned IP attempted login', {}, { notify: true });
+        return response.json({ error: 'Too many failed attempts, please try again later.' }, 429);
+      } else {
+        await KVService.put(`failedAttempts::${ip}`, attempts + 1, { expirationTtl: failedBan.failedAttemptsTtl });
+      }
+    }
+
 		logger.warn('Admin login attempt failed', {}, { notify: true });
 		return response.json({ error: 'Invalid password' }, 401);
 	}

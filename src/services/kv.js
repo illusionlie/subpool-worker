@@ -9,6 +9,14 @@ export class KVService {
     return kv;
   }
 
+  static async get(key, type = 'json') {
+    return this.#getKV().get(key, type);
+  }
+
+  static async put(key, value, options) {
+    return this.#getKV().put(key, value, options);
+  }
+
   static async getGlobalConfig() {
     return this.#getKV().get('config:global', 'json');
   }

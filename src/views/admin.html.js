@@ -50,7 +50,7 @@ export function renderAdminPage() {
       }
       .form-group { margin-bottom: 20px; }
       label { display: block; font-weight: 600; margin-bottom: 8px; }
-      input[type="text"], input[type="password"], textarea {
+      input[type="text"], input[type="password"], input[type="number"], textarea {
           width: 100%; padding: 10px; border: 1px solid var(--border-color);
           border-radius: 4px; font-size: 14px; box-sizing: border-box;
       }
@@ -209,7 +209,7 @@ export function renderAdminPage() {
       async refreshData() { try { [this.state.groups, this.state.config] = await Promise.all([this.api.getGroups(), this.api.getConfig()]); } catch (error) { console.error('Failed to refresh data:', error); this.UI.showToast('数据刷新失败', 'error'); } },
       async saveGroup() { const form = document.getElementById('group-form'); const group = { name: form.elements['group-name'].value, token: form.elements['group-token'].value, allowChinaAccess: form.elements['allow-china'].checked, nodes: form.elements['group-nodes'].value, filter: { enabled: form.elements['filter-enabled'].checked, rules: form.elements['filter-rules'].value.split('\\n').filter(Boolean) } }; if (!group.name || !group.token) { this.UI.showToast('组名和 Token 不能为空！', 'error'); return; } try { let savedGroup; if (this.state.isNewGroup) { savedGroup = await this.api.createGroup(group); } else { savedGroup = await this.api.updateGroup(group); } await this.refreshData(); this.state.isNewGroup = false; this.state.selectedGroupToken = savedGroup.token; this.render(); this.UI.showToast('保存成功！'); } catch (err) { console.error(err); this.UI.showToast('保存失败', 'error'); } },
       async deleteGroup() { const token = this.state.selectedGroupToken; try { await this.api.deleteGroup(token); await this.refreshData(); this.state.selectedGroupToken = null; this.state.isNewGroup = false; this.render(); this.UI.showToast('删除成功！'); } catch (err) { console.error(err); this.UI.showToast('删除失败', 'error'); } },
-      async saveSettings() { const form = document.getElementById('settings-form'); const newConfig = { adminPassword: form.elements['admin-password'].value || undefined, blockBots: form.elements['block-bots'].checked, telegram: { enabled: form.elements['tg-enabled'].checked, botToken: form.elements['tg-token'].value, chatId: form.elements['tg-chatid'].value, }, subconverter: { url: form.elements['subconverter-url'].value, configUrl: form.elements['subconverter-config'].value, } }; try { await this.api.saveConfig(newConfig); this.UI.showToast('设置已保存！如果修改了密码，下次登录生效。'); await this.refreshData(); this.render(); } catch (err) { console.error(err); this.UI.showToast('保存失败', 'error'); } },
+      async saveSettings() { const form = document.getElementById('settings-form'); const newConfig = { adminPassword: form.elements['admin-password'].value || undefined, blockBots: form.elements['block-bots'].checked, failedBan: { enabled: form.elements['failed-ban-enabled'].checked, maxAttempts: parseInt(form.elements['failed-ban-max-attempts'].value) || 5, banDuration: parseInt(form.elements['failed-ban-duration'].value) || 600, failedAttemptsTtl: parseInt(form.elements['failed-ban-ttl'].value) || 600, }, telegram: { enabled: form.elements['tg-enabled'].checked, botToken: form.elements['tg-token'].value, chatId: form.elements['tg-chatid'].value, }, subconverter: { url: form.elements['subconverter-url'].value, configUrl: form.elements['subconverter-config'].value, } }; try { await this.api.saveConfig(newConfig); this.UI.showToast('设置已保存！如果修改了密码，下次登录生效。'); await this.refreshData(); this.render(); } catch (err) { console.error(err); this.UI.showToast('保存失败', 'error'); } },
       
       // --- UI & RENDERING ---
       UI: {
@@ -238,7 +238,82 @@ export function renderAdminPage() {
       },
       renderSubscriptionsView() { return \` <aside class="sidebar"> <div class="sidebar-item new" data-action="new-group"> + 创建新订阅组 </div> \${this.state.groups.map(g => \`<div class="sidebar-item \${(this.state.selectedGroupToken === g.token && !this.state.isNewGroup) ? 'active' : ''}" data-action="select-group" data-token="\${this.escapeHtml(g.token)}"> \${this.escapeHtml(g.name)} </div>\`).join('')} </aside> <section class="content-area"> \${(this.state.selectedGroupToken || this.state.isNewGroup) ? this.renderGroupEditor() : '<div class="form-container"><p>请从左侧选择一个订阅组进行编辑，或创建一个新组。</p></div>'} </section> \`; },
       renderGroupEditor() { const group = this.state.isNewGroup ? { name: '', token: '', allowChinaAccess: false, nodes: '', filter: { enabled: false, rules: [] } } : this.state.groups.find(g => g.token === this.state.selectedGroupToken); if (!group) return '<div class="form-container"><p>无法找到该订阅组。</p></div>'; return \` <div class="form-container"> <form id="group-form"> <h2>\${this.state.isNewGroup ? '创建新订阅组' : '编辑: ' + this.escapeHtml(group.name)}</h2> <div class="form-group"> <label for="group-name">组名</label> <input type="text" id="group-name" value="\${this.escapeHtml(group.name)}"> </div> <div class="form-group"> <label for="group-token">Token</label> <div class="token-group"> <input type="text" id="group-token" value="\${this.escapeHtml(group.token)}" \${!this.state.isNewGroup ? 'readonly' : ''}> \${this.state.isNewGroup ? '<button class="btn btn-secondary" data-action="generate-token">随机</button>' : ''} </div> </div> <div class="form-group"> <label for="group-nodes">订阅链接 / 节点 (每行一个)</label> <textarea id="group-nodes">\${this.escapeHtml(group.nodes || '')}</textarea> </div> <div class="form-group checkbox-group"> <input type="checkbox" id="allow-china" \${group.allowChinaAccess ? 'checked' : ''}> <label for="allow-china">允许中国大陆 IP 访问</label> </div> <fieldset> <legend>过滤器</legend> <div class="form-group checkbox-group"> <input type="checkbox" id="filter-enabled" \${group.filter && group.filter.enabled ? 'checked' : ''}> <label for="filter-enabled">启用节点过滤器</label> </div> <div class="form-group"> <label for="filter-rules">过滤规则 (每行一个正则表达式, e.g., /过期/i)</label> <textarea id="filter-rules" placeholder="/剩余流量/i\\n/过期时间/i">\${this.escapeHtml((group.filter && group.filter.rules || []).join('\\n'))}</textarea> </div> </fieldset> <div class="actions"> <button class="btn btn-primary" data-action="save-group">保存</button> \${!this.state.isNewGroup ? '<button class="btn btn-danger" data-action="delete-group">删除</button>' : ''} </div> </form> </div> \`; },
-      renderSettingsView() { const cfg = this.state.config; return \` <div class="form-container"> <form id="settings-form"> <h2>全局设置</h2> <fieldset> <legend>安全设置</legend> <div class="form-group"> <label for="admin-password">管理密码 (留空则不修改)</label> <input type="password" id="admin-password" placeholder="输入新密码"> </div> <div class="form-group checkbox-group"> <input type="checkbox" id="block-bots" \${cfg.blockBots ? 'checked' : ''}> <label for="block-bots">阻止常见爬虫/机器人访问</label> </div> </fieldset> <fieldset> <legend>Telegram 通知</legend> <div class="form-group checkbox-group"> <input type="checkbox" id="tg-enabled" \${cfg.telegram && cfg.telegram.enabled ? 'checked' : ''}> <label for="tg-enabled">启用 TG 通知</label> </div> <div class="form-group"> <label for="tg-token">Bot Token</label> <input type="text" id="tg-token" value="\${this.escapeHtml(cfg.telegram && cfg.telegram.botToken || '')}"> </div> <div class="form-group"> <label for="tg-chatid">Chat ID</label> <input type="text" id="tg-chatid" value="\${this.escapeHtml(cfg.telegram && cfg.telegram.chatId || '')}"> </div> </fieldset> <fieldset> <legend>订阅转换</legend> <div class="form-group"> <label for="subconverter-url">Subconverter 后端地址 (不含 http(s)://)</label> <input type="text" id="subconverter-url" value="\${this.escapeHtml(cfg.subconverter && cfg.subconverter.url || '')}"> </div> <div class="form-group"> <label for="subconverter-config">Subconverter 配置文件 URL</label> <input type="text" id="subconverter-config" value="\${this.escapeHtml(cfg.subconverter && cfg.subconverter.configUrl || '')}"> </div> </fieldset> <div class="actions actions-center"> <button class="btn btn-primary" data-action="save-settings">保存设置</button> </div> </form> </div> \`; }
+      renderSettingsView() { 
+        const cfg = this.state.config; 
+        return \` 
+          <div class="form-container" style="max-width: 1200px; padding: 20px;"> 
+            <form id="settings-form"> 
+              <h2 style="text-align: center; margin-bottom: 30px;">全局设置</h2> 
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: start;">
+                <div class="settings-column">
+                  <fieldset> 
+                    <legend>安全设置</legend> 
+                    <div class="form-group"> 
+                      <label for="admin-password">管理密码 (留空则不修改)</label> 
+                      <input type="password" id="admin-password" placeholder="输入新密码"> 
+                    </div> 
+                    <div class="form-group checkbox-group"> 
+                      <input type="checkbox" id="block-bots" \${cfg.blockBots ? 'checked' : ''}> 
+                      <label for="block-bots">阻止常见爬虫/机器人访问</label> 
+                    </div> 
+                  </fieldset> 
+                  <fieldset> 
+                    <legend>登录失败防护</legend> 
+                    <div class="form-group checkbox-group"> 
+                      <input type="checkbox" id="failed-ban-enabled" \${cfg.failedBan && cfg.failedBan.enabled ? 'checked' : ''}> 
+                      <label for="failed-ban-enabled">启用登录失败防护</label> 
+                    </div> 
+                    <div class="form-group"> 
+                      <label for="failed-ban-max-attempts">最大失败次数</label> 
+                      <input type="number" id="failed-ban-max-attempts" value="\${cfg.failedBan && cfg.failedBan.maxAttempts || 5}" min="1" max="100"> 
+                      <small style="color: #666; font-size: 12px;">达到此次数后将被临时封禁</small> 
+                    </div> 
+                    <div class="form-group"> 
+                      <label for="failed-ban-duration">封禁时长 (秒)</label> 
+                      <input type="number" id="failed-ban-duration" value="\${cfg.failedBan && cfg.failedBan.banDuration || 600}" min="60" max="86400"> 
+                      <small style="color: #666; font-size: 12px;">封禁持续时间，默认600秒(10分钟)</small> 
+                    </div> 
+                    <div class="form-group"> 
+                      <label for="failed-ban-ttl">失败记录保留时间 (秒)</label> 
+                      <input type="number" id="failed-ban-ttl" value="\${cfg.failedBan && cfg.failedBan.failedAttemptsTtl || 600}" min="60" max="86400"> 
+                      <small style="color: #666; font-size: 12px;">失败尝试记录的保留时间</small> 
+                    </div> 
+                  </fieldset>
+                </div>
+                <div class="settings-column">
+                  <fieldset> 
+                    <legend>Telegram 通知</legend> 
+                    <div class="form-group checkbox-group"> 
+                      <input type="checkbox" id="tg-enabled" \${cfg.telegram && cfg.telegram.enabled ? 'checked' : ''}> 
+                      <label for="tg-enabled">启用 TG 通知</label> 
+                    </div> 
+                    <div class="form-group"> 
+                      <label for="tg-token">Bot Token</label> 
+                      <input type="text" id="tg-token" value="\${this.escapeHtml(cfg.telegram && cfg.telegram.botToken || '')}"> 
+                    </div> 
+                    <div class="form-group"> 
+                      <label for="tg-chatid">Chat ID</label> 
+                      <input type="text" id="tg-chatid" value="\${this.escapeHtml(cfg.telegram && cfg.telegram.chatId || '')}"> 
+                    </div> 
+                  </fieldset> 
+                  <fieldset> 
+                    <legend>订阅转换</legend> 
+                    <div class="form-group"> 
+                      <label for="subconverter-url">Subconverter 后端地址 (不含 http(s)://)</label> 
+                      <input type="text" id="subconverter-url" value="\${this.escapeHtml(cfg.subconverter && cfg.subconverter.url || '')}"> 
+                    </div> 
+                    <div class="form-group"> 
+                      <label for="subconverter-config">Subconverter 配置文件 URL</label> 
+                      <input type="text" id="subconverter-config" value="\${this.escapeHtml(cfg.subconverter && cfg.subconverter.configUrl || '')}"> 
+                    </div> 
+                  </fieldset> 
+                </div>
+              </div>
+              <div class="actions actions-center" style="margin-top: 30px;"> 
+                <button class="btn btn-primary" data-action="save-settings">保存设置</button> 
+              </div> 
+            </form> 
+          </div> \`; }
     };
     document.addEventListener('DOMContentLoaded', () => App.init());
   `;

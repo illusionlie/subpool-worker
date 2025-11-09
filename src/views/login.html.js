@@ -43,6 +43,10 @@ export function renderLoginPage() {
                     });
                     if (response.ok) {
                         window.location.reload(); // 登录成功，刷新页面，浏览器将带上新cookie
+                    } else if (response.status === 429) {
+                        const data = await response.json().catch(() => ({}));
+                        errorMessage.textContent = data.error || '登录失败次数过多，请稍后再试';
+                        errorMessage.style.color = '#dc3545';
                     } else {
                         errorMessage.textContent = '密码错误，请重试。';
                     }
