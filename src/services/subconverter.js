@@ -92,7 +92,7 @@ export class SubconverterService {
     const promises = urls.map(url =>
       fetch(url, {
         method: 'GET',
-        headers: { 'User-Agent': `v2rayN/6.45 (${request.headers.get('User-Agent') || 'N/A'})` },
+        headers: { 'User-Agent': `v2rayN/7.15.7 (${request.headers.get('User-Agent') || 'N/A'})` },
         signal: controller.signal,
       }).then(async resp => {
         if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
