@@ -24,6 +24,7 @@ export class KVService {
   static async getAllGroups() {
     const kv = this.#getKV();
     const index = await kv.get('groups:index', 'json') || [];
+    if (!index || !Array.isArray(index)) return [];
     if (index.length === 0) return [];
     
     const promises = index.map(token => this.getGroup(token));
