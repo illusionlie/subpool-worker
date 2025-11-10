@@ -46,17 +46,51 @@ const BOT_UA_PATTERNS = new RegExp([
   'pinterest',
   'ChatGPT-User',
   'QQ',          // QQ
-  'MicroMessenger' // 微信
+  'MicroMessenger', // 微信
+  'request',     // 一些简单的爬虫
+  'curl',
+  'wget',
 ].join('|'), 'i');
 
 /**
  * 判断是否为机器人访问
- * @param {string} userAgent - User-Agent字符串
- * @returns {boolean} 是否为机器人
+ * @param {Request} request - 请求对象
+ * @returns {object} 包含分数和是否为机器人的对象
  */
-export function isBot(userAgent) {
-  if (!userAgent) return false;
-  return BOT_UA_PATTERNS.test(userAgent);
+export function isBot(request) {
+  let score = 0;
+
+  // 检查 User-Agent
+  const userAgent = request.headers.get('User-Agent') || '';
+  if (!userAgent) score += 30;
+  if (BOT_UA_PATTERNS.test(userAgent)) score += 50;
+  if (!userAgent.includes('Mozilla/5.0') && !(/Chrome|Safari|Firefox|Edg/).test(userAgent)) score += 30;
+  
+  // 检查是否是 Cloudflare Worker
+  const isWorker = request.headers.get('Cf-Worker') || '';
+  if (isWorker) score += 50;
+
+  // 检查 HTTP 版本
+  const httpVersion = request.cf?.httpProtocol || '';
+  if (httpVersion == 'HTTP/1.1') score += 20;
+  if (httpVersion == 'HTTP/1.0') score += 50;
+
+  // 检查 TLS 版本
+  const tlsVersion = request.cf?.tlsVersion || '';
+  if (!tlsVersion || tlsVersion == 'TLSv1.0' || tlsVersion == 'TLSv1.1') score += 50;
+
+  // 检查 sec-fetch-*
+  const secSite = request.headers.get('sec-fetch-site') || '';
+  const secMode = request.headers.get('sec-fetch-mode') || '';
+  const secDest = request.headers.get('sec-fetch-dest') || '';
+  const secUser = request.headers.get('sec-fetch-user') || '';
+  if (!secSite || secMode !== 'navigate' || secDest !== 'document' || !secUser) score += 30;
+
+  // 检查 Accept
+  const accept = request.headers.get('Accept') || '';
+  if (!accept.includes('text/html') || accept.length < 10) score += 20;
+
+  return { score, ifBot: score >= 50 };
 }
 
 

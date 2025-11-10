@@ -13,19 +13,19 @@ export async function handleSubscriptionRequest(request, token, logger) {
   }
 
   const config = ConfigService.get();
-  const country = request.headers.get('cf-ipcountry')|| 'XX'; // 'XX' for unknown
+  const country = request.cf?.country || 'XX'; // 'XX' for unknown
   if (country === 'CN' && !group.allowChinaAccess) {
     logger.warn('Blocked China access attempt', { UserAgent: request.headers.get('User-Agent'), URL: request.url }, { notify: true });
     return response.normal(renderNginxWelcomePage(), 403);
   }
 
-  const userAgent = request.headers.get('User-Agent') || '';
-  if (config.blockBots && isBot(userAgent)) {
-    logger.info('Blocked bot access attempt', { UserAgent: request.headers.get('User-Agent'), URL: request.url });
+  const { score, ifBot } = isBot(request);
+  if (config.blockBots && ifBot) {
+    logger.info('Blocked bot access attempt', { UserAgent: request.headers.get('User-Agent'), URL: request.url, Score: score });
     return response.normal(renderNginxWelcomePage(), 403);
   }
 
-  logger.info('Subscription accessed', { token, groupName: group.name });
+  logger.info('Subscription accessed', { token, groupName: group.name, Score: score });
   
   try {
     const { content, headers } = await SubconverterService.generateSubscription(group, request, token);
