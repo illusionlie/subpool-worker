@@ -33,20 +33,28 @@ let _config = null;
 let _env = null;
 let _ctx = null;
 
+function deepMerge(target, ...sources) {
+  for (const source of sources) {
+    if (!source) continue;
+    for (const key in source) {
+      if (source[key] instanceof Object && key in target && target[key] instanceof Object) {
+        if (!target[key]) Object.assign(target, { [key]: {} });
+        deepMerge(target[key], source[key]);
+      } else {
+        Object.assign(target, { [key]: source[key] });
+      }
+    }
+  }
+  return target;
+}
+
 export class ConfigService {
   static async init(env, ctx) {
     _env = env;
     _ctx = ctx;
     const kvConfig = await KVService.getGlobalConfig().catch(() => null) || {};
     // 深层合并，防止覆盖整个对象
-    _config = {
-      ...DEFAULT_CONFIG,
-      ...kvConfig,
-      telegram: { ...DEFAULT_CONFIG.telegram, ...kvConfig.telegram },
-      subconverter: { ...DEFAULT_CONFIG.subconverter, ...kvConfig.subconverter },
-      subscriptionInfo: { ...DEFAULT_CONFIG.subscriptionInfo, ...kvConfig.subscriptionInfo },
-      failedBan: { ...DEFAULT_CONFIG.failedBan, ...kvConfig.failedBan },
-    };
+    _config = deepMerge({}, DEFAULT_CONFIG, kvConfig);
   }
 
   static get(key) {
