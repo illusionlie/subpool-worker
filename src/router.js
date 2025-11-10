@@ -18,7 +18,7 @@ export async function handleRequest(request, env, ctx, logger) {
   router.all('/admin/*', () => handleAdminRequest(request, logger));
 
   // 提取 token (路径的第一部分)
-  router.get('/:token', ({ params }) => handleSubscriptionRequest(request, params.token, logger));
+  router.get('/:token/?', ({ params }) => handleSubscriptionRequest(request, params.token, logger));
 
   const routerResponse = await router.fetch(request);
   if (routerResponse) return routerResponse;
