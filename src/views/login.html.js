@@ -35,6 +35,9 @@ export function renderLoginPage() {
             form.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 errorMessage.textContent = '';
+                const loginButton = form.querySelector('button');
+                loginButton.disabled = true;
+                loginButton.textContent = '登录中...';
                 try {
                     const response = await fetch('/admin/api/login', {
                         method: 'POST',
@@ -53,6 +56,10 @@ export function renderLoginPage() {
                     }
                 } catch (err) {
                     errorMessage.textContent = '发生网络错误。';
+                } finally {
+                    // 无论成功失败，都恢复按钮状态
+                    loginButton.disabled = false;
+                    loginButton.textContent = '登录';
                 }
             });
         </script>
