@@ -10,6 +10,7 @@ export function renderAdminPage() {
           --border-color: #dee2e6; --card-bg: #fff; --sidebar-bg: #e9ecef;
           --hover-bg: #d8dde2; --active-bg: #007bff; --active-text: #fff;
           --danger-color: #dc3545; --success-color: #28a745;
+          --sidebar-width: 280px;
       }
       body { 
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
@@ -31,7 +32,7 @@ export function renderAdminPage() {
       .nav button.active { border-bottom-color: var(--primary-color); color: var(--primary-color); font-weight: 600; }
       .main-content { display: flex; flex-grow: 1; overflow: hidden; }
       .sidebar {
-          width: 280px; background-color: var(--sidebar-bg); padding: 10px;
+          width: var(--sidebar-width); background-color: var(--sidebar-bg); padding: 10px;
           border-right: 1px solid var(--border-color); display: flex; flex-direction: column;
           overflow-y: auto; flex-shrink: 0;
       }
@@ -55,9 +56,8 @@ export function renderAdminPage() {
           border-radius: 4px; font-size: 14px; box-sizing: border-box;
       }
       textarea { height: 200px; font-family: "SF Mono", "Fira Code", monospace; resize: vertical; }
-      .token-group { display: flex; align-items: center; }
+      .token-group { display: flex; align-items: center; gap: 10px; }
       .token-group input { flex-grow: 1; }
-      .token-group button { margin-left: 10px; }
       .checkbox-group { display: flex; align-items: center; }
       .checkbox-group input { margin-right: 10px; width: auto; }
       .btn {
@@ -71,18 +71,20 @@ export function renderAdminPage() {
       .btn-danger:hover { background-color: #c82333; }
       .btn-secondary { background-color: #6c757d; color: #fff; }
       .btn-secondary:hover { background-color: #5a6268; }
-      .actions { display: flex; justify-content: space-between; margin-top: 20px; }
+      .actions { display: flex; justify-content: space-between; margin-top: 20px; gap: 10px; }
       .actions-center { justify-content: center; }
       #toast {
           position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
           padding: 10px 20px; background-color: rgba(0,0,0,0.7); color: white;
           border-radius: 5px; z-index: 1001; opacity: 0; transition: opacity 0.5s;
+          max-width: 90vw; text-align: center;
       }
       #toast.show { opacity: 1; }
       .modal-overlay {
           position: fixed; top: 0; left: 0; width: 100%; height: 100%;
           background-color: rgba(0, 0, 0, 0.5); z-index: 1000;
           display: flex; align-items: center; justify-content: center;
+          padding: 20px; box-sizing: border-box;
       }
       .modal-box {
           background: var(--card-bg); padding: 25px; border-radius: 8px;
@@ -96,6 +98,121 @@ export function renderAdminPage() {
       }
       @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
       .loading-container { display: flex; align-items: center; justify-content: center; height: 100%; gap: 10px; font-size: 18px; color: #6c757d; }
+      .mobile-menu-btn {
+          display: none;
+          background: none;
+          border: none;
+          font-size: 18px;
+          cursor: pointer;
+          padding: 8px;
+      }
+      /* 响应式设计 */
+      @media (max-width: 768px) {
+          .header {
+              padding: 0 15px;
+              height: 50px;
+          }
+          .header h1 {
+              font-size: 18px;
+          }
+          .header-left {
+              gap: 10px;
+          }
+          .nav {
+              display: none;
+          }
+          .mobile-menu-btn {
+              display: block;
+          }
+          .main-content {
+              position: relative;
+          }
+          .sidebar {
+              position: fixed;
+              top: 50px;
+              left: -100%;
+              height: calc(100vh - 50px);
+              z-index: 100;
+              transition: left 0.3s ease;
+              box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+              width: var(--sidebar-width);
+          }
+          .sidebar.open {
+              left: 0;
+          }
+          .content-area {
+              padding: 20px 0;
+              width: 100%;
+          }
+          .form-container {
+              padding: 0 15px;
+          }
+          .token-group {
+              flex-direction: column;
+              align-items: stretch;
+              gap: 10px;
+          }
+          .actions {
+              flex-direction: column;
+              gap: 10px;
+          }
+          .modal-box {
+              padding: 20px;
+              margin: 20px;
+          }
+          .modal-actions {
+              flex-direction: column;
+              gap: 10px;
+          }
+          .btn {
+              width: 100%;
+              text-align: center;
+          }
+          .header .btn {
+              width: auto;
+          }
+      }
+      @media (max-width: 480px) {
+          .header {
+              padding: 0 10px;
+          }
+          .form-container {
+              padding: 0 10px;
+          }
+          .sidebar {
+              left: -100%;
+          }
+          .sidebar.open {
+              left: 0;
+          }
+          textarea {
+              height: 150px;
+          }
+      }
+      /* 平板设备适配 */
+      @media (min-width: 769px) and (max-width: 1024px) {
+          .sidebar {
+              width: 240px;
+          }
+          .form-container {
+              max-width: 800px;
+          }
+      }
+      .sidebar-overlay {
+          display: none;
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background-color: rgba(0, 0, 0, 0.5);
+          z-index: 99;
+      }
+      @media (max-width: 768px) {
+          .sidebar-overlay.show {
+              display: block;
+          }
+      }
   </style>
   `;
 
@@ -195,14 +312,55 @@ export function renderAdminPage() {
                   this.state.confirmPromise = null;
                   this.cache.modal.innerHTML = '';
                   break;
-              case 'navigate': this.state.currentView = e.target.dataset.view; this.state.selectedGroupToken = null; this.state.isNewGroup = false; this.render(); break;
-              case 'select-group': this.state.selectedGroupToken = e.target.dataset.token; this.state.isNewGroup = false; this.render(); break;
-              case 'new-group': this.state.selectedGroupToken = null; this.state.isNewGroup = true; this.render(); break;
+              case 'toggle-sidebar':
+                  this.toggleSidebar();
+                  break;
+              case 'close-sidebar':
+                  this.closeSidebar();
+                  break;
+              case 'navigate': 
+                  this.state.currentView = e.target.dataset.view; 
+                  this.state.selectedGroupToken = null; 
+                  this.state.isNewGroup = false; 
+                  this.closeSidebar();
+                  this.render(); 
+                  break;
+              case 'select-group': 
+                  this.state.selectedGroupToken = e.target.dataset.token; 
+                  this.state.isNewGroup = false; 
+                  this.closeSidebar();
+                  this.render(); 
+                  break;
+              case 'new-group': 
+                  this.state.selectedGroupToken = null; 
+                  this.state.isNewGroup = true; 
+                  this.closeSidebar();
+                  this.render(); 
+                  break;
               case 'generate-token': const { token } = await this.api.generateToken(); document.getElementById('group-token').value = token; break;
               case 'copy-url': await this.copyGroupUrl(); break;
               case 'save-group': await this.saveGroup(); break;
               case 'delete-group': if (await this.UI.confirm('确定要删除这个订阅组吗？此操作不可撤销。')) await this.deleteGroup(); break;
               case 'save-settings': await this.saveSettings(); break;
+          }
+      },
+
+      // 移动端侧边栏控制
+      toggleSidebar() {
+          const sidebar = document.querySelector('.sidebar');
+          const overlay = document.querySelector('.sidebar-overlay');
+          if (sidebar && overlay) {
+              sidebar.classList.toggle('open');
+              overlay.classList.toggle('show');
+          }
+      },
+
+      closeSidebar() {
+          const sidebar = document.querySelector('.sidebar');
+          const overlay = document.querySelector('.sidebar-overlay');
+          if (sidebar && overlay) {
+              sidebar.classList.remove('open');
+              overlay.classList.remove('show');
           }
       },
       
@@ -323,6 +481,7 @@ export function renderAdminPage() {
           this.cache.app.innerHTML = \`
               <header class="header">
                   <div class="header-left">
+                      <button class="mobile-menu-btn" data-action="toggle-sidebar">☰</button>
                       <h1>订阅管理</h1>
                       <nav class="nav">
                           <button data-action="navigate" data-view="subscriptions" class="\${this.state.currentView === 'subscriptions' ? 'active' : ''}">订阅管理</button>
@@ -332,6 +491,7 @@ export function renderAdminPage() {
                   <button class="btn btn-secondary btn-sm" data-action="logout">登出</button>
               </header>
               <main class="main-content">
+                  <div class="sidebar-overlay" data-action="close-sidebar"></div>
                   \${this.state.currentView === 'subscriptions' ? this.renderSubscriptionsView() : this.renderSettingsView()}
               </main>
           \`;
