@@ -22,7 +22,7 @@ export async function handleRequest(request, env, ctx, logger) {
     .all('/robots.txt', () => response.normal('User-agent: *\nDisallow: /\n', 200));
 
   // 提取 token (路径的第一部分)
-  router.get('/:token/?', ({ params }) => handleSubscriptionRequest(request, params.token, logger));
+  router.get('/sub/:token/?', ({ params }) => handleSubscriptionRequest(request, params.token, logger));
 
   const routerResponse = await router.fetch(request);
   if (routerResponse) return routerResponse;

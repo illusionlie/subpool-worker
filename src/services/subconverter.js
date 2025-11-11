@@ -42,7 +42,7 @@ export class SubconverterService {
     // 创建一个指向自身的回调 URL，用于向 sub-converter 提供已处理好的节点
     let finalConversionUrls = [...conversionUrls];
     if (content.trim()) {
-      const selfUrl = `https://${url.hostname}/${token}?format=base64`;
+      const selfUrl = `https://${url.hostname}/sub/${token}?format=base64`;
       finalConversionUrls.unshift(selfUrl);
     }
     
