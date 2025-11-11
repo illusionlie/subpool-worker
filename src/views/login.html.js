@@ -48,7 +48,8 @@ export function renderLoginPage() {
                         errorMessage.textContent = data.error || '登录失败次数过多，请稍后再试';
                         errorMessage.style.color = '#dc3545';
                     } else {
-                        errorMessage.textContent = '密码错误，请重试。';
+                        const data = await response.json().catch(() => ({}));
+                        errorMessage.textContent = data.error || '密码错误，请重试。';
                     }
                 } catch (err) {
                     errorMessage.textContent = '发生网络错误。';
