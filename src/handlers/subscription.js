@@ -5,13 +5,13 @@ import { renderNginxWelcomePage } from '../views/nginx.html.js';
 import { response, isBot } from '../utils.js';
 
 export async function handleSubscriptionRequest(request, token, logger) {
-  const group = await KVService.getGroup(token);
   if (!token || token.length > 128 || token.includes('/')) {
     // 无效的 token 格式，直接返回 400
     logger.warn('Invalid token format access attempt', { URL: request.url }, { notify: true });
     return response.normal('Invalid token format.', 400);
   }
   
+  const group = await KVService.getGroup(token);
   if (!group) {
     logger.warn('Invalid token access attempt', { URL: request.url }, { notify: true });
     return response.normal(renderNginxWelcomePage(), 404);
