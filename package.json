@@ -9,7 +9,8 @@
     "dev": "wrangler dev --env dev"
   },
   "devDependencies": {
-    "wrangler": "^4.74.0"
+    "@cloudflare/workers-types": "^4.20250823.0",
+    "wrangler": "^4.59.1"
   },
   "dependencies": {
     "itty-router": "^5.0.23"
