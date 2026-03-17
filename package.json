@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "deploy": "npm run build && wrangler deploy",
-    "build": "npm ci && wrangler deploy --dry-run --outdir=dist",
+    "build": "npm ci && wrangler deploy --dry-run",
     "dev": "wrangler dev --env dev"
   },
   "devDependencies": {
@@ -13,6 +13,6 @@
     "wrangler": "^4.59.1"
   },
   "dependencies": {
-    "itty-router": "^5.0.22"
+    "itty-router": "^5.0.23"
   }
 }

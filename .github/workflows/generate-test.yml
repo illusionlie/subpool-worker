@@ -1,42 +1,19 @@
-name: Generate and dry-run
+name: Generate and check deploy command
 
 on:
   push:
   pull_request:
-  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  test-and-dry-run:
+  check-deploy-command:
     runs-on: ubuntu-latest
-    name: Test and Dry-Run Deploy
+    name: Check deploy command
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
-      - name: Validate Secrets
-        run: |
-          echo "Validating secrets..."
-          if [ -z "${{ secrets.WORKER_NAME }}" ]; then
-            echo "::error::Secret WORKER_NAME is not set. Please add it to your repository secrets."
-            exit 1
-          fi
-          if [ -z "${{ secrets.CF_API_TOKEN }}" ]; then
-            echo "::error::Secret CF_API_TOKEN is not set. Please add it to your repository secrets."
-            exit 1
-          fi
-          if [ -z "${{ secrets.CF_KV_NAMESPACE_ID }}" ]; then
-            echo "::error::Secret CF_KV_NAMESPACE_ID is not set. Please add it to your repository secrets."
-            exit 1
-          fi
-          if [ -z "${{ secrets.JWT_SECRET }}" ]; then
-            echo "::error::Secret JWT_SECRET is not set. Please add it to your repository secrets."
-            exit 1
-          fi
-          if [ -z "${{ secrets.DEBUG_SECRET }}" ]; then
-            echo "::error::Secret DEBUG_SECRET is not set. Please add it to your repository secrets."
-            exit 1
-          fi
-          echo "✅ All necessary secrets are set."
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -47,39 +24,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Fetch Account ID
-        id: fetch_account_id
+      - name: Generate wrangler.toml for test
         run: |
-          if [[ -n "${{ secrets.CF_ACCOUNT_ID }}" ]]; then
-            ACCOUNT_ID="${{ secrets.CF_ACCOUNT_ID }}"
-            echo "Using provided CF_ACCOUNT_ID from secrets."
-          else
-            ACCOUNT_ID=$(curl -X GET "https://api.cloudflare.com/client/v4/accounts" -H "Authorization: Bearer ${CF_API_TOKEN}" -H "Content-Type:application/json" | jq ".result[0].id" -r)
-            if [[ "$ACCOUNT_ID" == "null" ]]; then
-              echo "Failed to get an account id, please make sure you have set up CF_API_TOKEN correctly!"
-              exit 1
-            fi
-          fi
-          echo 'account_id='$ACCOUNT_ID >> $GITHUB_OUTPUT
-
-        env:
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-
-      - name: Generate wrangler.toml from template
-        run: |
-          sed -e "s/__WORKER_NAME__/${{ secrets.WORKER_NAME }}/g" \
-            -e "s/__KV_NAMESPACE_ID__/${{ secrets.CF_KV_NAMESPACE_ID }}/g" \
-            -e "s/__ADMIN_PASSWORD__/${{ secrets.ADMIN_PASSWORD }}/g" \
-            -e "s/__JWT_SECRET__/${{ secrets.JWT_SECRET }}/g" \
-            -e "s/__DEBUG_SECRET__/${{ secrets.DEBUG_SECRET }}/g" \
+          sed -e "s/__WORKER_NAME__/sub-pool-worker-test-${GITHUB_SHA}/g" \
+            -e "s/__KV_NAMESPACE_ID__/00000000000000000000000000000000/g" \
+            -e "s/__ADMIN_PASSWORD__/admin-password/g" \
+            -e "s/__JWT_SECRET__/jwt-secret/g" \
+            -e "s/__DEBUG_SECRET__/debug-secret/g" \
             wrangler.toml.example > wrangler.toml
-          if [[ -n "${{ secrets.CUSTOM_DOMAIN }}" ]]; then
-            echo "Setting custom domain to ${{ secrets.CUSTOM_DOMAIN }}"
-            echo -e "\n[[routes]]\n \
-              pattern = \"${{ secrets.CUSTOM_DOMAIN }}\"\n \
-              custom_domain = true" \
-              >> wrangler.toml
-          fi
 
-      - name: Dry-run deploy
-        run: npm run build
+      - name: Check deploy command (dry run)
+        run: npx wrangler deploy --dry-run --config wrangler.toml
