@@ -3,8 +3,24 @@ import globals from 'globals';
 
 const sharedNoUnusedVarsRule = ['error', {
   argsIgnorePattern: '^_',
+  varsIgnorePattern: '^_',
   caughtErrorsIgnorePattern: '^_',
 }];
+
+const baseStyleRules = {
+  'prefer-const': 'warn',
+  quotes: ['warn', 'single', { avoidEscape: true }],
+  semi: ['warn', 'always'],
+  'comma-dangle': ['warn', 'never'],
+  'object-curly-spacing': ['warn', 'always'],
+  'no-trailing-spaces': 'warn',
+  'eol-last': ['warn', 'always']
+};
+
+const baseJavaScriptRules = {
+  'no-unused-vars': sharedNoUnusedVarsRule,
+  ...baseStyleRules
+};
 
 export default [
   {
@@ -12,9 +28,8 @@ export default [
       'node_modules/**',
       'dist/**',
       '.wrangler/**',
-      'public/**',
-      'coverage/**',
-    ],
+      'coverage/**'
+    ]
   },
   js.configs.recommended,
   {
@@ -23,14 +38,24 @@ export default [
       ecmaVersion: 'latest',
       sourceType: 'module',
       globals: {
-        ...globals.browser,
+        ...globals.es2024,
         ...globals.serviceworker,
-        ...globals.worker,
-      },
+        ...globals.worker
+      }
     },
-    rules: {
-      'no-unused-vars': sharedNoUnusedVarsRule,
+    rules: baseJavaScriptRules
+  },
+  {
+    files: ['public/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'script',
+      globals: {
+        ...globals.es2024,
+        ...globals.browser
+      }
     },
+    rules: baseJavaScriptRules
   },
   {
     files: ['test/**/*.js', 'eslint.config.mjs'],
@@ -41,11 +66,12 @@ export default [
         ...globals.node,
         ...globals.browser,
         ...globals.serviceworker,
-        ...globals.worker,
-      },
+        ...globals.worker
+      }
     },
     rules: {
-      'no-unused-vars': sharedNoUnusedVarsRule,
-    },
-  },
+      'no-unused-vars': sharedNoUnusedVarsRule
+    }
+  }
 ];
+
