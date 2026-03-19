@@ -15,13 +15,13 @@ export function applyFilter(content, filterConfig) {
       const encodedRegex = new RegExp(encodeURIComponent(pattern), flags);
       
       return { original: originalRegex, encoded: encodedRegex };
-    } catch (e) {
-      // 兼容非 /.../i 格式的旧规则
-      const originalRegex = new RegExp(rule);
-      const encodedRegex = new RegExp(encodeURIComponent(rule));
-      return { original: originalRegex, encoded: encodedRegex };
-    }
-  });
+      } catch (_err) {
+        // 兼容非 /.../i 格式的旧规则
+        const originalRegex = new RegExp(rule);
+        const encodedRegex = new RegExp(encodeURIComponent(rule));
+        return { original: originalRegex, encoded: encodedRegex };
+      }
+});
 
   return content.split('\n')
     .filter(line => {
@@ -194,7 +194,7 @@ export const response = {
    * @param {any} [contentType] - 被忽略的内容类型参数（仅为保持参数一致性）
    * @returns {Response} 返回 JSON 格式的 Response 对象
    */
-  json(body, status = 200, headers = {}, contentType) {
+  json(body, status = 200, headers = {}, _contentType) {
     const headersObj = this.buildHeaders(headers, 'application/json');
 
     // 序列化 body 为 JSON 字符串（处理 undefined/特殊值）

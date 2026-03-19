@@ -99,7 +99,7 @@ export async function createJwt(secret, payload = {}, logger) {
     return `${partialToken}.${signature}`;
   } catch (err) {
     logger.error(err, { customMessage: 'Failed to create JWT' });
-    throw new Error('Failed to create JWT');
+    throw new Error('Failed to create JWT', { cause: err });
   }
 }
 
@@ -244,7 +244,9 @@ export async function refreshJwt(secret, token, logger) {
     }
     
     // 创建新令牌，保留原始载荷但更新过期时间
-    const { iat, exp, ...originalPayload } = payload;
+    const originalPayload = { ...payload };
+    delete originalPayload.iat;
+    delete originalPayload.exp;
     return await createJwt(secret, originalPayload, logger);
   } catch (err) {
     logger.error(err, { customMessage: 'JWT refresh error' });

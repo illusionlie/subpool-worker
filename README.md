@@ -114,6 +114,13 @@ src/
  *    **`CUSTOM_DOMAIN`**
       *   **值**: 自定义域（可选）
 
+### 本地检查
+
+- 运行 [`npm run lint`](package.json:8) 执行 ESLint 静态检查
+- 运行 [`npm test`](package.json:9) 执行 Node 内置测试
+- 运行 [`npm run check`](package.json:10) 串行执行 lint 与测试
+- 运行 [`npm run build`](package.json:11) 执行 Cloudflare Workers dry-run 构建校验
+
 ### 本地开发
 
 1. 启动开发服务器：

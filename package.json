@@ -1,14 +1,21 @@
 {
   "name": "subpool-worker",
   "version": "0.1.0",
+  "type": "module",
   "description": "SubPool Worker",
   "main": "src/index.js",
   "scripts": {
-    "deploy": "npm run build && wrangler deploy",
-    "build": "npm ci && wrangler deploy --dry-run",
+    "lint": "eslint .",
+    "test": "node --test",
+    "check": "npm run lint && npm test",
+    "build": "wrangler deploy --dry-run",
+    "deploy": "npm run check && npm run build && wrangler deploy",
     "dev": "wrangler dev --env dev"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.0.3",
+    "globals": "^17.4.0",
     "wrangler": "^4.59.1"
   },
   "dependencies": {

@@ -8,9 +8,32 @@ permissions:
   contents: read
 
 jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    name: Lint and test
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
   check-deploy-command:
     runs-on: ubuntu-latest
     name: Check deploy command
+    needs: lint-and-test
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -34,4 +57,4 @@ jobs:
             wrangler.toml.example > wrangler.toml
 
       - name: Check deploy command (dry run)
-        run: npx wrangler deploy --dry-run --config wrangler.toml
+        run: npm run build
