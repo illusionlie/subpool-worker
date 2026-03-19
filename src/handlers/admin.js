@@ -140,7 +140,7 @@ async function handleApiRequest(request, url, logger) {
 }
 
 
-async function fetchAdminAsset(request, assetPath, logger, status = 200, headers = {}) {
+async function fetchAdminAsset(request, assetPath, logger, status = null, headers = {}) {
   return serveAssetResponse(request, ConfigService.getEnv().ASSETS, assetPath, logger, {
     status,
     headers,
@@ -149,6 +149,10 @@ async function fetchAdminAsset(request, assetPath, logger, status = 200, headers
     fetchFailureMessage: 'Failed to fetch admin asset',
     logLabel: 'admin asset fetch',
   });
+}
+
+function isAdminEntryPage(pathname) {
+  return pathname === '/admin' || pathname === '/admin/' || pathname === '/admin/index.html';
 }
 
 // 主处理器
@@ -183,12 +187,28 @@ export async function handleAdminRequest(request, logger) {
 			// 处理API请求
 			return handleApiRequest(request, url, logger);
 		}
-		// 提供主应用
-		return fetchAdminAsset(request, '/admin/index.html', logger, 200, { 'Set-Cookie': cookie });
+
+		  if (isAdminEntryPage(url.pathname)) {
+		    // 管理后台入口始终返回主页面
+		    return fetchAdminAsset(request, '/admin/index.html', logger, 200, { 'Set-Cookie': cookie });
+		  }
+
+		  // 其他 /admin/* 路径按静态资源原路径返回（例如 /admin/js/index.js）
+		  return fetchAdminAsset(request, url.pathname, logger, null, { 'Set-Cookie': cookie });
 	} else {
 		// 认证失败
 		// 清除可能存在的无效cookie
-		return fetchAdminAsset(request, '/admin/login.html', logger, 401, { 'Set-Cookie': createAuthCookie('invalid', 0) });
+		  const expiredCookieHeaders = { 'Set-Cookie': createAuthCookie('invalid', 0) };
+
+		  if (url.pathname.startsWith('/admin/api/')) {
+		    return response.json({ error: 'Unauthorized' }, 401, expiredCookieHeaders);
+		  }
+
+		  if (isAdminEntryPage(url.pathname)) {
+		    return fetchAdminAsset(request, '/admin/login.html', logger, 401, expiredCookieHeaders);
+		  }
+
+		  return response.normal('Unauthorized.', 401, expiredCookieHeaders, 'text/plain; charset=utf-8');
 	}
 }
 
