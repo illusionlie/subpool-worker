@@ -6,6 +6,12 @@ workers_dev = true
 # 关闭遥测
 send_metrics = false
 
+[assets]
+directory = "./public"
+binding = "ASSETS"
+# 需要让 Worker 先执行，以便统一鉴权和安全响应头
+run_worker_first = true
+
 # KV 命名空间
 [[kv_namespaces]]
 binding = "KV"  # 不要修改此项

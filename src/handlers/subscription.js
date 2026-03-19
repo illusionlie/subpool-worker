@@ -1,8 +1,17 @@
 import { ConfigService } from '../services/config.js';
 import { KVService } from '../services/kv.js';
 import { SubconverterService } from '../services/subconverter.js';
-import { renderNginxWelcomePage } from '../views/nginx.html.js';
-import { response, isBot } from '../utils.js';
+import { response, isBot, serveAssetResponse } from '../utils.js';
+
+async function fetchDefaultPage(request, status, logger) {
+  return serveAssetResponse(request, ConfigService.getEnv().ASSETS, '/index.html', logger, {
+    status,
+    notConfiguredMessage: 'Default fallback asset is unavailable because ASSETS binding is not configured.',
+    notFoundMessage: 'Default fallback asset not found.',
+    fetchFailureMessage: 'Failed to fetch subscription fallback asset',
+    logLabel: 'subscription fallback asset fetch',
+  });
+}
 
 export async function handleSubscriptionRequest(request, token, logger) {
   if (!token || token.length > 128 || token.includes('/')) {
@@ -14,20 +23,20 @@ export async function handleSubscriptionRequest(request, token, logger) {
   const group = await KVService.getGroup(token);
   if (!group) {
     logger.warn('Invalid token access attempt', { URL: request.url }, { notify: true });
-    return response.normal(renderNginxWelcomePage(), 404);
+    return fetchDefaultPage(request, 404, logger);
   }
 
   const config = ConfigService.get();
   const country = request.cf?.country || 'XX'; // 'XX' for unknown
   if (country === 'CN' && !group.allowChinaAccess) {
     logger.warn('Blocked China access attempt', { UserAgent: request.headers.get('User-Agent'), URL: request.url }, { notify: true });
-    return response.normal(renderNginxWelcomePage(), 403);
+    return fetchDefaultPage(request, 403, logger);
   }
 
   const { score, ifBot } = isBot(request);
   if (config.blockBots && ifBot) {
     logger.info('Blocked bot access attempt', { UserAgent: request.headers.get('User-Agent'), URL: request.url, Score: score });
-    return response.normal(renderNginxWelcomePage(), 403);
+    return fetchDefaultPage(request, 403, logger);
   }
 
   logger.info('Subscription accessed', { token, groupName: group.name, Score: score });

@@ -93,6 +93,73 @@ export function isBot(request) {
 }
 
 
+export function createAssetRequest(request, assetPath = null) {
+  const assetUrl = new URL(request.url);
+  if (assetPath) {
+    assetUrl.pathname = assetPath;
+    assetUrl.search = '';
+  }
+
+  const headers = new Headers(request.headers);
+  headers.delete('if-none-match');
+  headers.delete('if-modified-since');
+
+  return new Request(assetUrl.toString(), {
+    method: request.method === 'HEAD' ? 'HEAD' : 'GET',
+    headers,
+  });
+}
+
+export async function serveAssetResponse(request, assetBinding, assetPath, logger, {
+  status = null,
+  headers = {},
+  notConfiguredMessage = 'ASSETS binding is not configured.',
+  notFoundMessage = 'Static asset not found.',
+  fetchFailureMessage = 'Failed to fetch static asset',
+  logLabel = 'asset fetch',
+} = {}) {
+  const hasIfNoneMatch = request.headers.has('if-none-match');
+  const hasIfModifiedSince = request.headers.has('if-modified-since');
+
+  if (hasIfNoneMatch || hasIfModifiedSince) {
+    logger.debug(`Stripping conditional headers before ${logLabel}`, {
+      assetPath,
+      requestedStatus: status,
+      hasIfNoneMatch,
+      hasIfModifiedSince,
+    });
+  }
+
+  if (!assetBinding) {
+    logger.error('ASSETS binding is not configured.', { assetPath, logLabel });
+    return response.normal(notConfiguredMessage, 500, headers);
+  }
+
+  try {
+    const assetRequest = createAssetRequest(request, assetPath);
+    const assetResponse = await assetBinding.fetch(assetRequest);
+    const responseStatus = status ?? assetResponse.status;
+
+    logger.debug('Fetched asset response', {
+      assetPath,
+      assetStatus: assetResponse.status,
+      finalStatus: responseStatus,
+      contentType: assetResponse.headers.get('Content-Type'),
+      logLabel,
+    });
+
+    if (!assetResponse.ok) {
+      logger.error('Asset fetch failed', { assetPath, assetStatus: assetResponse.status, logLabel });
+      return response.normal(notFoundMessage, 500, headers);
+    }
+
+    return response.fromAsset(assetResponse, responseStatus, headers);
+  } catch (err) {
+    logger.error(err, { customMessage: fetchFailureMessage, assetPath, logLabel });
+    return response.normal('Static asset unavailable.', 500, headers);
+  }
+}
+
 export const response = {
   /**
    * 通用响应方法，使用指定的 content-type
@@ -105,6 +172,18 @@ export const response = {
   normal(body, status = 200, headers = {}, contentType = 'text/html; charset=utf-8') {
     const headersObj = this.buildHeaders(headers, contentType);
     return new Response(body, { status, headers: headersObj });
+  },
+
+  fromAsset(assetResponse, status = assetResponse.status, headers = {}) {
+    const contentType = assetResponse.headers.get('Content-Type') || 'application/octet-stream';
+    const headersObj = new Headers(assetResponse.headers);
+    const secureHeaders = this.buildHeaders(headers, contentType);
+
+    secureHeaders.forEach((value, key) => {
+      headersObj.set(key, value);
+    });
+
+    return new Response(assetResponse.body, { status, headers: headersObj });
   },
 
   /**

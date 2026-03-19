@@ -1,8 +1,6 @@
 import { ConfigService, deepMerge } from '../services/config.js';
 import { KVService } from '../services/kv.js';
-import { renderAdminPage } from '../views/admin.html.js';
-import { renderLoginPage } from '../views/login.html.js';
-import { response } from '../utils.js';
+import { response, serveAssetResponse } from '../utils.js';
 import { verifyJwt, createJwt, refreshJwt, getAuthCookie, createAuthCookie } from '../services/auth.js';
 import { Router } from 'itty-router';
 
@@ -142,15 +140,30 @@ async function handleApiRequest(request, url, logger) {
 }
 
 
+async function fetchAdminAsset(request, assetPath, logger, status = 200, headers = {}) {
+  return serveAssetResponse(request, ConfigService.getEnv().ASSETS, assetPath, logger, {
+    status,
+    headers,
+    notConfiguredMessage: 'Admin asset is unavailable because ASSETS binding is not configured.',
+    notFoundMessage: 'Admin asset not found.',
+    fetchFailureMessage: 'Failed to fetch admin asset',
+    logLabel: 'admin asset fetch',
+  });
+}
+
 // 主处理器
 export async function handleAdminRequest(request, logger) {
 	const url = new URL(request.url);
   const router = Router();
-	const jwtSecret = ConfigService.getEnv().JWT_SECRET;
+	const { JWT_SECRET: jwtSecret, ASSETS } = ConfigService.getEnv();
 	if (!jwtSecret) {
 		logger.fatal('JWT_SECRET is not configured.');
 		return response.json({ error: 'JWT_SECRET is not configured.'}, 500);
 	}
+  if (!ASSETS) {
+    logger.fatal('ASSETS binding is not configured.');
+    return response.json({ error: 'ASSETS binding is not configured.' }, 500);
+  }
 
 	// 检查是否是登录API的请求，如果是，则直接处理
   router.post('/admin/api/login', () => handleLogin(request, logger));
@@ -171,12 +184,11 @@ export async function handleAdminRequest(request, logger) {
 			return handleApiRequest(request, url, logger);
 		}
 		// 提供主应用
-		return response.normal(renderAdminPage(), 200, { 'Set-Cookie': cookie });
+		return fetchAdminAsset(request, '/admin/index.html', logger, 200, { 'Set-Cookie': cookie });
 	} else {
 		// 认证失败
 		// 清除可能存在的无效cookie
-		const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': createAuthCookie('invalid', 0) };
-		return response.normal(renderLoginPage(), 401, headers);
+		return fetchAdminAsset(request, '/admin/login.html', logger, 401, { 'Set-Cookie': createAuthCookie('invalid', 0) });
 	}
 }
 

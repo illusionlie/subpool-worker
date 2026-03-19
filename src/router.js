@@ -1,9 +1,19 @@
 import { handleAdminRequest } from './handlers/admin.js';
 import { handleSubscriptionRequest } from './handlers/subscription.js';
-import { renderNginxWelcomePage } from './views/nginx.html.js';
 import { ConfigService } from './services/config.js';
-import { response } from './utils.js';
+import { response, serveAssetResponse } from './utils.js';
 import { Router } from 'itty-router';
+
+async function fetchAsset(request, env, logger, assetPath = null, status = null, headers = {}) {
+  return serveAssetResponse(request, env.ASSETS, assetPath, logger, {
+    status,
+    headers,
+    notConfiguredMessage: 'Fallback asset is unavailable because ASSETS binding is not configured.',
+    notFoundMessage: 'Fallback asset not found.',
+    fetchFailureMessage: 'Failed to fetch fallback asset',
+    logLabel: 'fallback asset fetch',
+  });
+}
 
 export async function handleRequest(request, env, ctx, logger) {
   // 每次请求都初始化/加载最新的配置
@@ -28,8 +38,8 @@ export async function handleRequest(request, env, ctx, logger) {
   if (routerResponse) return routerResponse;
 
   // 记录未处理的路径
-  logger.warn('Unhandled path, returning default page', { pathname });
+  logger.warn('Unhandled path, returning asset page', { pathname });
   
   // 根路径或任何其他未知路径
-  return response.normal(renderNginxWelcomePage(), 200);
+  return fetchAsset(request, env, logger, '/index.html', 200);
 }

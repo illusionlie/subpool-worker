@@ -16,6 +16,12 @@
 ## 项目结构
 
 ```text
+public/                 # Worker Assets 静态页面资源
+├── admin/
+│   ├── index.html      # 管理后台页面
+│   └── login.html      # 登录页面
+└── index.html          # 默认欢迎页
+
 src/
 ├── handlers/           # 请求处理器
 │   ├── admin.js        # 管理后台处理
@@ -27,7 +33,6 @@ src/
 │   ├── logger.js       # 日志服务
 │   ├── subconverter.js # 订阅转换服务
 │   └── telegram.js     # Telegram 通知服务
-├── views/              # 页面模板
 ├── index.js            # 入口文件
 ├── router.js           # 路由配置
 └── utils.js            # 工具函数
@@ -64,6 +69,7 @@ src/
 
 4. 配置 Cloudflare：
    - 复制 [wrangler.toml.example](wrangler.toml.example) 到 `wrangler.toml`
+   - `wrangler.toml.example` 已启用 Worker Assets，会自动上传 `public/` 目录中的静态页面资源
    - 修改配置文件中的占位符：
      - `__WORKER_NAME__`：你的 Worker 名称
      - `__KV_NAMESPACE_ID__`：你的 KV 命名空间 ID
@@ -117,6 +123,13 @@ src/
    ```
 
 2. 访问 `http://localhost:8787` 查看应用
+
+### 前端资源位置
+
+- `public/admin/index.html`：管理后台主页面
+- `public/admin/login.html`：登录页
+- `public/index.html`：默认欢迎页 / 拦截回退页
+- Worker 通过 `wrangler.toml` 中的 `[assets]` 配置加载这些静态资源，并在代码中统一补充鉴权与安全响应头
 
 ## 使用说明
 
@@ -176,11 +189,12 @@ src/
 ## 技术栈
 
 - [Cloudflare Workers](https://workers.cloudflare.com/): Serverless 执行环境
+- [Cloudflare Worker Assets](https://developers.cloudflare.com/workers/static-assets/): 静态页面托管与缓存
 - [Cloudflare KV](https://developers.cloudflare.com/workers/learning/how-kv-works/): 全球分布式键值存储
 - [itty-router](https://github.com/kwhitley/itty-router): 轻量级 Worker 路由器
 - [GitHub Actions](https://github.com/features/actions): CI/CD 自动化部署
 - JavaScript (ES Module)
-- HTML/CSS (管理界面)
+- HTML/CSS/原生 JavaScript (管理界面)
 
 ## 许可证
 
