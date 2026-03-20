@@ -85,17 +85,17 @@ export async function createJwt(secret, payload = {}, logger) {
     const encodedHeader = base64UrlEncode(JSON.stringify(header));
     const encodedPayload = base64UrlEncode(JSON.stringify(jwtPayload));
     const partialToken = `${encodedHeader}.${encodedPayload}`;
-    
+
     const signatureBuffer = await crypto.subtle.sign(
       'HMAC',
       key,
       textEncoder.encode(partialToken)
     );
-    
+
     const signature = base64UrlEncode(
       String.fromCharCode(...new Uint8Array(signatureBuffer))
     );
-    
+
     return `${partialToken}.${signature}`;
   } catch (err) {
     logger.error(err, { customMessage: 'Failed to create JWT' });
@@ -114,16 +114,16 @@ export async function verifyJwt(secret, token, logger) {
     logger.warn('Secret or token is missing for JWT verification.');
     return false;
   }
-  
+
   try {
     const key = await getKey(secret);
     const [header, payload, signature] = token.split('.');
-    
+
     if (!header || !payload || !signature) {
       logger.error('JWT verification error: malformed token');
       return false;
     }
-    
+
     // 验证签名
     const signatureBuffer = Uint8Array.from(base64UrlDecode(signature), c => c.charCodeAt(0));
     const isValid = await crypto.subtle.verify(
@@ -132,35 +132,35 @@ export async function verifyJwt(secret, token, logger) {
       signatureBuffer,
       textEncoder.encode(`${header}.${payload}`)
     );
-    
+
     if (!isValid) {
       console.error('JWT verification error: invalid signature');
       return false;
     }
-    
+
     // 解析并验证载荷
     const payloadData = JSON.parse(base64UrlDecode(payload));
     const now = Math.floor(Date.now() / 1000);
-    
+
     // 检查过期时间
     if (payloadData.exp && payloadData.exp < now) {
       logger.error('JWT verification error: token expired');
       return false;
     }
-    
+
     // 检查签发时间
     if (payloadData.iat && payloadData.iat > now) {
       logger.error('JWT verification error: token issued in the future');
       return false;
     }
-    
+
     // 检查签发者和受众
-    if (payloadData.iss !== CONFIG.TOKEN_ISSUER || 
+    if (payloadData.iss !== CONFIG.TOKEN_ISSUER ||
         payloadData.aud !== CONFIG.TOKEN_AUDIENCE) {
       logger.error('JWT verification error: invalid issuer or audience');
       return false;
     }
-    
+
     return payloadData;
   } catch (err) {
     logger.error('JWT verification error:', err);
@@ -178,14 +178,14 @@ export function getAuthCookie(request, logger) {
     logger.error('Invalid request object');
     return null;
   }
-  
+
   const cookieHeader = request.headers.get('Cookie');
   if (!cookieHeader) return null;
-  
+
   try {
     const cookies = cookieHeader.split(';');
     const authCookie = cookies.find(c => c.trim().startsWith(`${CONFIG.COOKIE_NAME}=`));
-    
+
     return authCookie ? authCookie.split('=')[1].trim() : null;
   } catch (err) {
     logger.error(err, { customMessage: 'Error parsing cookies' });
@@ -204,13 +204,13 @@ export function createAuthCookie(token, maxAge, options = {}) {
   if (!token || typeof maxAge !== 'number' || isNaN(maxAge)) {
     throw new Error('Token and maxAge are required');
   }
-  
+
   const {
     path = CONFIG.COOKIE_PATH,
     domain = '',
     sameSite = 'Strict'
   } = options;
-  
+
   const cookieString = [
     `${CONFIG.COOKIE_NAME}=${token}`,
     `Path=${path}`,
@@ -220,7 +220,7 @@ export function createAuthCookie(token, maxAge, options = {}) {
     'SameSite=' + sameSite,
     ...(domain ? [`Domain=${domain}`] : [])
   ].join('; ');
-  
+
   return cookieString;
 }
 
@@ -236,13 +236,13 @@ export async function refreshJwt(secret, token, logger) {
     logger.error('JWT refresh error: missing secret or token');
     return null;
   }
-  
+
   try {
     const payload = await verifyJwt(secret, token);
     if (!payload) {
       return null;
     }
-    
+
     // 创建新令牌，保留原始载荷但更新过期时间
     const originalPayload = { ...payload };
     delete originalPayload.iat;

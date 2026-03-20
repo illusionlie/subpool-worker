@@ -8,7 +8,7 @@ export class TelegramService {
     }
 
     const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
-    
+
     const payload = {
       chat_id: config.chatId,
       text: message,

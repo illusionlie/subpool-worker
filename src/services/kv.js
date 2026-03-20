@@ -34,7 +34,7 @@ export class KVService {
     const index = await kv.get('groups:index', 'json') || [];
     if (!index || !Array.isArray(index)) return [];
     if (index.length === 0) return [];
-    
+
     const promises = index.map(token => this.getGroup(token));
     const groups = await Promise.all(promises);
     return groups.filter(Boolean); // 过滤掉可能已删除但索引未清理的 null 项
@@ -58,7 +58,7 @@ export class KVService {
 
   static async deleteGroup(token) {
     const kv = this.#getKV();
-    
+
     // 更新索引
     let index = await kv.get('groups:index', 'json') || [];
     index = index.filter(t => t !== token);

@@ -8,25 +8,25 @@ const DEFAULT_CONFIG = {
   subUpdateTime: 4,
   subscriptionInfo: {
       totalTB: 99,
-      expireDate: '2099-12-31',
+      expireDate: '2099-12-31'
   },
   telegram: {
     enabled: false,
     botToken: '',
     chatId: '',
-    logAllAccess: false,
+    logAllAccess: false
   },
   subconverter: {
     url: '',
     protocol: 'https',
-    configUrl: 'https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_MultiCountry.ini',
+    configUrl: 'https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_MultiCountry.ini'
   },
   failedBan: {
     enabled: false,
     maxAttempts: 5,
     banDuration: 600, // 10 minutes
-    failedAttemptsTtl: 600, // 10 minutes
-  },
+    failedAttemptsTtl: 600 // 10 minutes
+  }
 };
 
 let _config = null;

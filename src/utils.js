@@ -2,18 +2,18 @@ export function applyFilter(content, filterConfig) {
   if (!filterConfig || !filterConfig.enabled || !filterConfig.rules || filterConfig.rules.length === 0) {
     return content;
   }
-  
+
   // 将字符串规则转换为 RegExp 对象，同时创建URL编码版本
   const regexRules = filterConfig.rules.map(rule => {
     try {
       const match = rule.match(new RegExp('^/(.*?)/([gimy]*)$'));
       const pattern = match[1];
       const flags = match[2];
-      
+
       // 创建原始规则和URL编码规则
       const originalRegex = new RegExp(pattern, flags);
       const encodedRegex = new RegExp(encodeURIComponent(pattern), flags);
-      
+
       return { original: originalRegex, encoded: encodedRegex };
       } catch (_err) {
         // 兼容非 /.../i 格式的旧规则
@@ -27,7 +27,7 @@ export function applyFilter(content, filterConfig) {
     .filter(line => {
       if (!line.trim()) return true;
       // 同时测试原始规则和编码规则
-      return !regexRules.some(ruleSet => 
+      return !regexRules.some(ruleSet =>
         ruleSet.original.test(line) || ruleSet.encoded.test(line)
       );
     })
@@ -48,7 +48,7 @@ const BOT_UA_PATTERNS = new RegExp([
   'QQ',          // QQ
   'MicroMessenger', // 微信
   'request',     // 一些简单的爬虫
-  'wget',
+  'wget'
 ].join('|'), 'i');
 
 /**
@@ -106,7 +106,7 @@ export function createAssetRequest(request, assetPath = null) {
 
   return new Request(assetUrl.toString(), {
     method: request.method === 'HEAD' ? 'HEAD' : 'GET',
-    headers,
+    headers
   });
 }
 
@@ -116,7 +116,7 @@ export async function serveAssetResponse(request, assetBinding, assetPath, logge
   notConfiguredMessage = 'ASSETS binding is not configured.',
   notFoundMessage = 'Static asset not found.',
   fetchFailureMessage = 'Failed to fetch static asset',
-  logLabel = 'asset fetch',
+  logLabel = 'asset fetch'
 } = {}) {
   const hasIfNoneMatch = request.headers.has('if-none-match');
   const hasIfModifiedSince = request.headers.has('if-modified-since');
@@ -126,7 +126,7 @@ export async function serveAssetResponse(request, assetBinding, assetPath, logge
       assetPath,
       requestedStatus: status,
       hasIfNoneMatch,
-      hasIfModifiedSince,
+      hasIfModifiedSince
     });
   }
 
@@ -145,7 +145,7 @@ export async function serveAssetResponse(request, assetBinding, assetPath, logge
       assetStatus: assetResponse.status,
       finalStatus: responseStatus,
       contentType: assetResponse.headers.get('Content-Type'),
-      logLabel,
+      logLabel
     });
 
     if (!assetResponse.ok) {
@@ -229,11 +229,11 @@ export const response = {
       'Cross-Origin-Resource-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp',
       'upgrade-insecure-requests': '1',
-      'Content-Security-Policy': csp.join('; '),
+      'Content-Security-Policy': csp.join('; ')
     });
     return headersObj;
   }
-}
+};
 
 /**
  * Checks if a string is a valid Base64 string.
@@ -243,7 +243,7 @@ export const response = {
 export function isValidBase64(str) {
   if (typeof str !== 'string') return false;
   if (str.length === 0) return true; // 空字符串是有效的 Base64
-  
+
   const cleanStr = str.replace(/\s+/g, '');
 
   // 空字符串检查（清理后可能为空）

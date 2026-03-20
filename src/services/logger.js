@@ -6,7 +6,7 @@ const logLevels = {
   warn: 2,
   error: 3,
   fatal: 4,
-  none: 5,
+  none: 5
 };
 
 export default class LoggerService {
@@ -28,7 +28,7 @@ export default class LoggerService {
     if (this.logLevel === undefined) {
       this.logLevel = logLevels[defaultLogLevel];
     }
-    
+
     // 检查请求头以确定是否需要覆盖日志级别
     const debugHeaderValue = request.headers.get('X-Debug-Log');
     const debugSecret = env.DEBUG_SECRET;
@@ -52,7 +52,7 @@ export default class LoggerService {
     if (levelNumber < this.logLevel && !this.debugOverride) {
       return;
     }
-    
+
     const logObject = {
       timestamp: new Date().toISOString(),
       level: level.toUpperCase(),
@@ -64,10 +64,10 @@ export default class LoggerService {
         method: this.request.method,
         colo: this.request.cf?.colo,
         country: this.request.cf?.country,
-        region: this.request.cf?.region,
+        region: this.request.cf?.region
       },
       // 合并任何提供的自定义数据
-      ...data,
+      ...data
     };
 
     if (options.notify || level === 'error' || level === 'fatal') {
@@ -116,12 +116,12 @@ export default class LoggerService {
       if (dataString !== '{}') {
         const MAX_LENGTH = 4096;
         const truncatedData = dataString.length > MAX_LENGTH
-          ? dataString.substring(0, MAX_LENGTH) + '...' 
+          ? dataString.substring(0, MAX_LENGTH) + '...'
           : dataString;
         details = `<tg-spoiler>${truncatedData}</tg-spoiler>`;
       }
     }
-    
+
     const msg = [
       `<b>${emoji} [${level}] ${message}</b>`,
       `Timestamp: ${logObject.timestamp}`,
@@ -147,7 +147,7 @@ export default class LoggerService {
         error: {
           message: message.message,
           stack: message.stack,
-          name: message.name,
+          name: message.name
         },
         ...data
       };
@@ -156,6 +156,6 @@ export default class LoggerService {
       this._log('error', message, data, options);
     }
   }
-  
+
   fatal(message, data, options) { this._log('fatal', message, data, options); }
 }

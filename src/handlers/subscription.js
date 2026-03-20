@@ -9,7 +9,7 @@ async function fetchDefaultPage(request, status, logger) {
     notConfiguredMessage: 'Default fallback asset is unavailable because ASSETS binding is not configured.',
     notFoundMessage: 'Default fallback asset not found.',
     fetchFailureMessage: 'Failed to fetch subscription fallback asset',
-    logLabel: 'subscription fallback asset fetch',
+    logLabel: 'subscription fallback asset fetch'
   });
 }
 
@@ -19,7 +19,7 @@ export async function handleSubscriptionRequest(request, token, logger) {
     logger.warn('Invalid token format access attempt', { URL: request.url }, { notify: true });
     return response.normal('Invalid token format.', 400);
   }
-  
+
   const group = await KVService.getGroup(token);
   if (!group) {
     logger.warn('Invalid token access attempt', { URL: request.url }, { notify: true });
@@ -40,7 +40,7 @@ export async function handleSubscriptionRequest(request, token, logger) {
   }
 
   logger.info('Subscription accessed', { token, groupName: group.name, Score: score });
-  
+
   try {
     const { content, headers } = await SubconverterService.generateSubscription(group, request, token, logger);
     return new Response(content, { headers });

@@ -11,7 +11,7 @@ async function fetchAsset(request, env, logger, assetPath = null, status = null,
     notConfiguredMessage: 'Fallback asset is unavailable because ASSETS binding is not configured.',
     notFoundMessage: 'Fallback asset not found.',
     fetchFailureMessage: 'Failed to fetch fallback asset',
-    logLabel: 'fallback asset fetch',
+    logLabel: 'fallback asset fetch'
   });
 }
 
@@ -39,7 +39,7 @@ export async function handleRequest(request, env, ctx, logger) {
 
   // 记录未处理的路径
   logger.warn('Unhandled path, returning asset page', { pathname });
-  
+
   // 根路径或任何其他未知路径
   return fetchAsset(request, env, logger, '/index.html', 200);
 }

@@ -108,7 +108,7 @@ async function handleApiRequest(request, url, logger) {
     }
 
 		await KVService.saveGroup(newGroup);
-		logger.info(`Group created`, { GroupName: newGroup.name, Token: newGroup.token }, { notify: true });
+		logger.info('Group created', { GroupName: newGroup.name, Token: newGroup.token }, { notify: true });
 		return response.json(newGroup);
   });
 
@@ -118,7 +118,7 @@ async function handleApiRequest(request, url, logger) {
     const groupData = await request.json();
     groupData.token = token;
 		await KVService.saveGroup(groupData);
-		logger.info(`Group updated`, { GroupName: groupData.name, Token: groupData.token }, { notify: true });
+		logger.info('Group updated', { GroupName: groupData.name, Token: groupData.token }, { notify: true });
 		return response.json(groupData);
   });
 
@@ -126,7 +126,7 @@ async function handleApiRequest(request, url, logger) {
   router.delete('/admin/api/groups/:token', async ({ params }) => {
     const token = params.token;
 		await KVService.deleteGroup(token);
-		logger.warn(`Group deleted`, { Token: token }, { notify: true });
+		logger.warn('Group deleted', { Token: token }, { notify: true });
 		return response.json({ success: true });
   });
 
@@ -147,7 +147,7 @@ async function fetchAdminAsset(request, assetPath, logger, status = null, header
     notConfiguredMessage: 'Admin asset is unavailable because ASSETS binding is not configured.',
     notFoundMessage: 'Admin asset not found.',
     fetchFailureMessage: 'Failed to fetch admin asset',
-    logLabel: 'admin asset fetch',
+    logLabel: 'admin asset fetch'
   });
 }
 
@@ -162,7 +162,7 @@ export async function handleAdminRequest(request, logger) {
 	const { JWT_SECRET: jwtSecret, ASSETS } = ConfigService.getEnv();
 	if (!jwtSecret) {
 		logger.fatal('JWT_SECRET is not configured.');
-		return response.json({ error: 'JWT_SECRET is not configured.'}, 500);
+		return response.json({ error: 'JWT_SECRET is not configured.' }, 500);
 	}
   if (!ASSETS) {
     logger.fatal('ASSETS binding is not configured.');
