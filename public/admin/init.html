@@ -4,25 +4,102 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>初始化管理员密码</title>
+  <script>
+    (() => {
+      try {
+        const storedTheme = localStorage.getItem('subpool-theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = storedTheme === 'light' || storedTheme === 'dark'
+          ? storedTheme
+          : (prefersDark ? 'dark' : 'light');
+
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_err) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
   <style>
+    :root {
+      color-scheme: light;
+      --bg-color: #f0f2f5;
+      --text-color: #212529;
+      --desc-color: #666666;
+      --card-bg: #ffffff;
+      --border-color: #d9d9d9;
+      --input-bg: #ffffff;
+      --input-text-color: #212529;
+      --input-placeholder-color: #6c757d;
+      --shadow-color: rgba(0, 0, 0, 0.15);
+      --primary-color: #007bff;
+      --primary-hover-color: #0056b3;
+      --error-color: #dc3545;
+      --success-color: #28a745;
+      --secondary-color: #6c757d;
+      --secondary-hover-color: #5a6268;
+    }
+
+    html[data-theme='dark'] {
+      color-scheme: dark;
+      --bg-color: #111827;
+      --text-color: #e5e7eb;
+      --desc-color: #9ca3af;
+      --card-bg: #1f2937;
+      --border-color: #374151;
+      --input-bg: #111827;
+      --input-text-color: #f3f4f6;
+      --input-placeholder-color: #9ca3af;
+      --shadow-color: rgba(0, 0, 0, 0.45);
+      --primary-color: #3b82f6;
+      --primary-hover-color: #2563eb;
+      --error-color: #f87171;
+      --success-color: #34d399;
+      --secondary-color: #4b5563;
+      --secondary-hover-color: #374151;
+    }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       display: flex;
       align-items: center;
       justify-content: center;
       height: 100vh;
       margin: 0;
-      background-color: #f0f2f5;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    .theme-toggle-wrapper {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 2;
+    }
+
+    .theme-toggle {
+      padding: 8px 12px;
+      font-size: 14px;
+      border-radius: 6px;
+      border: none;
+      background-color: var(--secondary-color);
+      color: #fff;
+      cursor: pointer;
+    }
+
+    .theme-toggle:hover {
+      background-color: var(--secondary-hover-color);
     }
 
     .init-box {
-      background: #fff;
+      background: var(--card-bg);
       padding: 40px;
       border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      box-shadow: 0 4px 12px var(--shadow-color);
       width: 400px;
       max-width: calc(100vw - 32px);
       box-sizing: border-box;
+      border: 1px solid var(--border-color);
     }
 
     h1 {
@@ -34,7 +111,7 @@
 
     .desc {
       text-align: center;
-      color: #666;
+      color: var(--desc-color);
       margin-bottom: 24px;
       font-size: 14px;
       line-height: 1.5;
@@ -44,13 +121,19 @@
       margin-bottom: 16px;
     }
 
-    input[type="password"] {
+    input[type='password'] {
       width: 100%;
       padding: 12px;
-      border: 1px solid #d9d9d9;
+      border: 1px solid var(--border-color);
       border-radius: 4px;
       font-size: 16px;
       box-sizing: border-box;
+      background-color: var(--input-bg);
+      color: var(--input-text-color);
+    }
+
+    input::placeholder {
+      color: var(--input-placeholder-color);
     }
 
     .btn {
@@ -59,9 +142,13 @@
       font-size: 16px;
       border-radius: 4px;
       border: none;
-      background-color: #007bff;
-      color: white;
+      background-color: var(--primary-color);
+      color: #fff;
       cursor: pointer;
+    }
+
+    .btn:hover {
+      background-color: var(--primary-hover-color);
     }
 
     .btn:disabled {
@@ -77,15 +164,18 @@
     }
 
     .error {
-      color: #dc3545;
+      color: var(--error-color);
     }
 
     .success {
-      color: #28a745;
+      color: var(--success-color);
     }
   </style>
 </head>
 <body>
+  <div class="theme-toggle-wrapper">
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换亮暗模式">切换主题</button>
+  </div>
   <div class="init-box">
     <h1>首次初始化</h1>
     <p class="desc">请设置管理员密码。设置成功后将自动进入后台。</p>
@@ -110,6 +200,42 @@
     const passwordInput = document.getElementById('password');
     const confirmPasswordInput = document.getElementById('confirm-password');
     const message = document.getElementById('message');
+    const themeToggle = document.getElementById('theme-toggle');
+
+    function getTheme() {
+      try {
+        const storedTheme = localStorage.getItem('subpool-theme');
+
+        if (storedTheme === 'light' || storedTheme === 'dark') {
+          return storedTheme;
+        }
+      } catch (_err) {
+        // ignore storage errors
+      }
+
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    function setTheme(theme) {
+      const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', normalizedTheme);
+
+      try {
+        localStorage.setItem('subpool-theme', normalizedTheme);
+      } catch (_err) {
+        // ignore storage errors
+      }
+
+      themeToggle.textContent = normalizedTheme === 'dark' ? '☀️ 亮色' : '🌙 暗色';
+    }
+
+    function toggleTheme() {
+      const currentTheme = document.documentElement.getAttribute('data-theme') || getTheme();
+      setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+    }
+
+    setTheme(getTheme());
+    themeToggle.addEventListener('click', toggleTheme);
 
     function setMessage(text, type = 'error') {
       message.textContent = text;
@@ -139,7 +265,7 @@
         return;
       }
 
-      const submitButton = form.querySelector('button');
+      const submitButton = form.querySelector('button[type="submit"]');
       submitButton.disabled = true;
       submitButton.textContent = '初始化中...';
 

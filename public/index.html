@@ -1,1 +1,183 @@
-<!DOCTYPE html><html><head><title>Welcome to nginx!</title><style>body{width:35em;margin:0 auto;font-family:Tahoma,Verdana,Arial,sans-serif}</style></head><body><h1>Welcome to nginx!</h1><p>If you see this page, the nginx web server is successfully installed and working. Further configuration is required.</p><p><em>Thank you for using nginx.</em></p></body></html>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome</title>
+  <script>
+    (() => {
+      try {
+        const storedTheme = localStorage.getItem('subpool-theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = storedTheme === 'light' || storedTheme === 'dark'
+          ? storedTheme
+          : (prefersDark ? 'dark' : 'light');
+
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_err) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-color: #f8f9fa;
+      --text-color: #212529;
+      --card-bg: #ffffff;
+      --border-color: #dee2e6;
+      --muted-color: #6c757d;
+      --shadow-color: rgba(0, 0, 0, 0.12);
+      --primary-color: #007bff;
+      --primary-hover-color: #0056b3;
+      --secondary-color: #6c757d;
+      --secondary-hover-color: #5a6268;
+    }
+
+    html[data-theme='dark'] {
+      color-scheme: dark;
+      --bg-color: #111827;
+      --text-color: #e5e7eb;
+      --card-bg: #1f2937;
+      --border-color: #374151;
+      --muted-color: #9ca3af;
+      --shadow-color: rgba(0, 0, 0, 0.45);
+      --primary-color: #3b82f6;
+      --primary-hover-color: #2563eb;
+      --secondary-color: #4b5563;
+      --secondary-hover-color: #374151;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Tahoma, Verdana, Arial, sans-serif;
+      background: var(--bg-color);
+      color: var(--text-color);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    .theme-toggle-wrapper {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 2;
+    }
+
+    .theme-toggle {
+      border: none;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 14px;
+      background: var(--secondary-color);
+      color: #fff;
+      cursor: pointer;
+    }
+
+    .theme-toggle:hover {
+      background: var(--secondary-hover-color);
+    }
+
+    .container {
+      max-width: 620px;
+      width: 100%;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      box-shadow: 0 6px 20px var(--shadow-color);
+      padding: 28px;
+    }
+
+    h1 {
+      margin-top: 0;
+      margin-bottom: 16px;
+      font-size: 28px;
+      color: var(--primary-color);
+    }
+
+    p {
+      line-height: 1.7;
+      margin: 0 0 12px;
+    }
+
+    em {
+      color: var(--muted-color);
+    }
+
+    .hint {
+      margin-top: 14px;
+      color: var(--muted-color);
+      font-size: 14px;
+    }
+
+    a {
+      color: var(--primary-color);
+      text-decoration: none;
+    }
+
+    a:hover {
+      color: var(--primary-hover-color);
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="theme-toggle-wrapper">
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换亮暗模式">切换主题</button>
+  </div>
+
+  <main class="container">
+    <h1>Welcome to nginx!</h1>
+    <p>If you see this page, the nginx web server is successfully installed and working. Further configuration is required.</p>
+    <p><em>Thank you for using nginx.</em></p>
+    <p class="hint">管理入口：<a href="/admin">/admin</a></p>
+  </main>
+
+  <script>
+    const themeToggle = document.getElementById('theme-toggle');
+
+    function getTheme() {
+      try {
+        const storedTheme = localStorage.getItem('subpool-theme');
+
+        if (storedTheme === 'light' || storedTheme === 'dark') {
+          return storedTheme;
+        }
+      } catch (_err) {
+        // ignore storage errors
+      }
+
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    function setTheme(theme) {
+      const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', normalizedTheme);
+
+      try {
+        localStorage.setItem('subpool-theme', normalizedTheme);
+      } catch (_err) {
+        // ignore storage errors
+      }
+
+      themeToggle.textContent = normalizedTheme === 'dark' ? '☀️ 亮色' : '🌙 暗色';
+    }
+
+    function toggleTheme() {
+      const currentTheme = document.documentElement.getAttribute('data-theme') || getTheme();
+      setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+    }
+
+    setTheme(getTheme());
+    themeToggle.addEventListener('click', toggleTheme);
+  </script>
+</body>
+</html>

@@ -1,29 +1,101 @@
-
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>登录</title>
+  <script>
+    (() => {
+      try {
+        const storedTheme = localStorage.getItem('subpool-theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = storedTheme === 'light' || storedTheme === 'dark'
+          ? storedTheme
+          : (prefersDark ? 'dark' : 'light');
+
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_err) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
   <style>
+    :root {
+      color-scheme: light;
+      --bg-color: #f0f2f5;
+      --text-color: #212529;
+      --card-bg: #ffffff;
+      --border-color: #d9d9d9;
+      --input-bg: #ffffff;
+      --input-text-color: #212529;
+      --input-placeholder-color: #6c757d;
+      --shadow-color: rgba(0, 0, 0, 0.15);
+      --primary-color: #007bff;
+      --primary-hover-color: #0056b3;
+      --error-color: #dc3545;
+      --secondary-color: #6c757d;
+      --secondary-hover-color: #5a6268;
+    }
+
+    html[data-theme='dark'] {
+      color-scheme: dark;
+      --bg-color: #111827;
+      --text-color: #e5e7eb;
+      --card-bg: #1f2937;
+      --border-color: #374151;
+      --input-bg: #111827;
+      --input-text-color: #f3f4f6;
+      --input-placeholder-color: #9ca3af;
+      --shadow-color: rgba(0, 0, 0, 0.45);
+      --primary-color: #3b82f6;
+      --primary-hover-color: #2563eb;
+      --error-color: #f87171;
+      --secondary-color: #4b5563;
+      --secondary-hover-color: #374151;
+    }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       display: flex;
       align-items: center;
       justify-content: center;
       height: 100vh;
       margin: 0;
-      background-color: #f0f2f5;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    .theme-toggle-wrapper {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 2;
+    }
+
+    .theme-toggle {
+      padding: 8px 12px;
+      font-size: 14px;
+      border-radius: 6px;
+      border: none;
+      background-color: var(--secondary-color);
+      color: #fff;
+      cursor: pointer;
+    }
+
+    .theme-toggle:hover {
+      background-color: var(--secondary-hover-color);
     }
 
     .login-box {
-      background: #fff;
+      background: var(--card-bg);
       padding: 40px;
       border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      box-shadow: 0 4px 12px var(--shadow-color);
       width: 360px;
       max-width: calc(100vw - 32px);
       box-sizing: border-box;
+      border: 1px solid var(--border-color);
     }
 
     h1 {
@@ -37,13 +109,19 @@
       margin-bottom: 20px;
     }
 
-    input[type="password"] {
+    input[type='password'] {
       width: 100%;
       padding: 12px;
-      border: 1px solid #d9d9d9;
+      border: 1px solid var(--border-color);
       border-radius: 4px;
       font-size: 16px;
       box-sizing: border-box;
+      background-color: var(--input-bg);
+      color: var(--input-text-color);
+    }
+
+    input::placeholder {
+      color: var(--input-placeholder-color);
     }
 
     .btn {
@@ -52,13 +130,17 @@
       font-size: 16px;
       border-radius: 4px;
       border: none;
-      background-color: #007bff;
-      color: white;
+      background-color: var(--primary-color);
+      color: #fff;
       cursor: pointer;
     }
 
+    .btn:hover {
+      background-color: var(--primary-hover-color);
+    }
+
     .error {
-      color: #dc3545;
+      color: var(--error-color);
       text-align: center;
       min-height: 1.2em;
       margin-top: 10px;
@@ -66,6 +148,9 @@
   </style>
 </head>
 <body>
+  <div class="theme-toggle-wrapper">
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换亮暗模式">切换主题</button>
+  </div>
   <div class="login-box">
     <h1>管理员登录</h1>
     <form id="login-form">
@@ -80,11 +165,47 @@
     const form = document.getElementById('login-form');
     const passwordInput = document.getElementById('password');
     const errorMessage = document.getElementById('error-message');
+    const themeToggle = document.getElementById('theme-toggle');
+
+    function getTheme() {
+      try {
+        const storedTheme = localStorage.getItem('subpool-theme');
+
+        if (storedTheme === 'light' || storedTheme === 'dark') {
+          return storedTheme;
+        }
+      } catch (_err) {
+        // ignore storage errors
+      }
+
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    function setTheme(theme) {
+      const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', normalizedTheme);
+
+      try {
+        localStorage.setItem('subpool-theme', normalizedTheme);
+      } catch (_err) {
+        // ignore storage errors
+      }
+
+      themeToggle.textContent = normalizedTheme === 'dark' ? '☀️ 亮色' : '🌙 暗色';
+    }
+
+    function toggleTheme() {
+      const currentTheme = document.documentElement.getAttribute('data-theme') || getTheme();
+      setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+    }
+
+    setTheme(getTheme());
+    themeToggle.addEventListener('click', toggleTheme);
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       errorMessage.textContent = '';
-      const loginButton = form.querySelector('button');
+      const loginButton = form.querySelector('button[type="submit"]');
       loginButton.disabled = true;
       loginButton.textContent = '登录中...';
       try {

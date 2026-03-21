@@ -1,241 +1,597 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>订阅管理后台</title>
+  <script>
+    (() => {
+      try {
+        const storedTheme = localStorage.getItem('subpool-theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = storedTheme === 'light' || storedTheme === 'dark'
+          ? storedTheme
+          : (prefersDark ? 'dark' : 'light');
 
-    <!DOCTYPE html>
-    <html lang="zh-CN">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>订阅管理后台</title>
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_err) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-color: #f8f9fa;
+      --text-color: #212529;
+      --primary-color: #007bff;
+      --primary-hover-color: #0056b3;
+      --border-color: #dee2e6;
+      --card-bg: #ffffff;
+      --sidebar-bg: #e9ecef;
+      --hover-bg: #d8dde2;
+      --active-bg: #007bff;
+      --active-text: #ffffff;
+      --danger-color: #dc3545;
+      --danger-hover-color: #c82333;
+      --success-color: #28a745;
+      --secondary-color: #6c757d;
+      --secondary-hover-color: #5a6268;
+      --muted-text-color: #6c757d;
+      --input-bg: #ffffff;
+      --input-text-color: #212529;
+      --input-placeholder-color: #6c757d;
+      --toast-bg: rgba(0, 0, 0, 0.7);
+      --toast-text-color: #ffffff;
+      --overlay-bg: rgba(0, 0, 0, 0.5);
+      --shadow-color: rgba(0, 0, 0, 0.3);
+      --spinner-track-color: #f3f3f3;
+      --sidebar-width: 280px;
+    }
 
-    <style>
-      :root {
-          --bg-color: #f8f9fa; --text-color: #212529; --primary-color: #007bff;
-          --border-color: #dee2e6; --card-bg: #fff; --sidebar-bg: #e9ecef;
-          --hover-bg: #d8dde2; --active-bg: #007bff; --active-text: #fff;
-          --danger-color: #dc3545; --success-color: #28a745;
-          --sidebar-width: 280px;
+    html[data-theme='dark'] {
+      color-scheme: dark;
+      --bg-color: #111827;
+      --text-color: #e5e7eb;
+      --primary-color: #3b82f6;
+      --primary-hover-color: #2563eb;
+      --border-color: #374151;
+      --card-bg: #1f2937;
+      --sidebar-bg: #0f172a;
+      --hover-bg: #2b3648;
+      --active-bg: #2563eb;
+      --active-text: #f9fafb;
+      --danger-color: #f87171;
+      --danger-hover-color: #ef4444;
+      --success-color: #34d399;
+      --secondary-color: #4b5563;
+      --secondary-hover-color: #374151;
+      --muted-text-color: #9ca3af;
+      --input-bg: #111827;
+      --input-text-color: #f3f4f6;
+      --input-placeholder-color: #9ca3af;
+      --toast-bg: rgba(17, 24, 39, 0.92);
+      --toast-text-color: #f9fafb;
+      --overlay-bg: rgba(0, 0, 0, 0.6);
+      --shadow-color: rgba(0, 0, 0, 0.5);
+      --spinner-track-color: #374151;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      margin: 0;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
+    }
+
+    .header {
+      background-color: var(--card-bg);
+      border-bottom: 1px solid var(--border-color);
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      height: 60px;
+      z-index: 10;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .settings-form-container {
+      max-width: 1200px;
+      padding: 20px;
+    }
+
+    .settings-title {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .settings-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+      align-items: start;
+    }
+
+    .settings-actions {
+      margin-top: 30px;
+    }
+
+    .header h1 {
+      font-size: 20px;
+      margin: 0;
+    }
+
+    .nav button {
+      font-size: 16px;
+      padding: 8px 16px;
+      border: none;
+      background: none;
+      color: var(--text-color);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+    }
+
+    .nav button.active {
+      border-bottom-color: var(--primary-color);
+      color: var(--primary-color);
+      font-weight: 600;
+    }
+
+    .main-content {
+      display: flex;
+      flex-grow: 1;
+      overflow: hidden;
+    }
+
+    .sidebar {
+      width: var(--sidebar-width);
+      background-color: var(--sidebar-bg);
+      padding: 10px;
+      border-right: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+
+    .sidebar-item {
+      padding: 12px 15px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-bottom: 5px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .sidebar-item:hover {
+      background-color: var(--hover-bg);
+    }
+
+    .sidebar-item.active {
+      background-color: var(--active-bg);
+      color: var(--active-text);
+    }
+
+    .sidebar-item.new {
+      color: var(--primary-color);
+      border: 1px dashed var(--primary-color);
+      text-align: center;
+    }
+
+    .content-area {
+      flex-grow: 1;
+      padding: 30px 0;
+      overflow-y: auto;
+    }
+
+    .form-container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    input[type='text'],
+    input[type='password'],
+    input[type='number'],
+    textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+      background-color: var(--input-bg);
+      color: var(--input-text-color);
+    }
+
+    input::placeholder,
+    textarea::placeholder {
+      color: var(--input-placeholder-color);
+    }
+
+    textarea {
+      height: 200px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      resize: vertical;
+    }
+
+    .token-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .token-group input {
+      flex-grow: 1;
+    }
+
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+    }
+
+    .checkbox-group input {
+      margin-right: 10px;
+      width: auto;
+    }
+
+    fieldset {
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 16px;
+      margin: 0 0 20px;
+      background-color: var(--card-bg);
+    }
+
+    legend {
+      padding: 0 8px;
+      font-weight: 600;
+      color: var(--text-color);
+    }
+
+    small {
+      color: var(--muted-text-color);
+      font-size: 12px;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    .btn-sm {
+      padding: 5px 10px;
+      font-size: 14px;
+    }
+
+    .btn-primary {
+      background-color: var(--primary-color);
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background-color: var(--primary-hover-color);
+    }
+
+    .btn-danger {
+      background-color: var(--danger-color);
+      color: #fff;
+    }
+
+    .btn-danger:hover {
+      background-color: var(--danger-hover-color);
+    }
+
+    .btn-secondary {
+      background-color: var(--secondary-color);
+      color: #fff;
+    }
+
+    .btn-secondary:hover {
+      background-color: var(--secondary-hover-color);
+    }
+
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 20px;
+      gap: 10px;
+    }
+
+    .actions-center {
+      justify-content: center;
+    }
+
+    #toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 20px;
+      background-color: var(--toast-bg);
+      color: var(--toast-text-color);
+      border-radius: 5px;
+      z-index: 1001;
+      opacity: 0;
+      transition: opacity 0.5s;
+      max-width: 90vw;
+      text-align: center;
+    }
+
+    #toast.show {
+      opacity: 1;
+    }
+
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: var(--overlay-bg);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+
+    .modal-box {
+      background: var(--card-bg);
+      padding: 25px;
+      border-radius: 8px;
+      box-shadow: 0 5px 15px var(--shadow-color);
+      width: 90%;
+      max-width: 400px;
+      border: 1px solid var(--border-color);
+    }
+
+    .modal-box h2 {
+      margin-top: 0;
+    }
+
+    .modal-actions {
+      margin-top: 20px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .spinner {
+      border: 4px solid var(--spinner-track-color);
+      border-top: 4px solid var(--primary-color);
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
       }
-      body {
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-          margin: 0; background-color: var(--bg-color); color: var(--text-color);
-          display: flex; height: 100vh; overflow: hidden;
+
+      100% {
+        transform: rotate(360deg);
       }
-      #app { display: flex; flex-direction: column; width: 100%; height: 100%; }
-      .header {
-          background-color: var(--card-bg); border-bottom: 1px solid var(--border-color);
-          padding: 0 20px; display: flex; align-items: center; justify-content: space-between;
-          flex-shrink: 0; height: 60px; z-index: 10;
-      }
-      .header-left { display: flex; align-items: center; gap: 20px; }
-      .header h1 { font-size: 20px; margin: 0; }
-      .nav button {
-          font-size: 16px; padding: 8px 16px; border: none; background: none; cursor: pointer;
-          border-bottom: 2px solid transparent;
-      }
-      .nav button.active { border-bottom-color: var(--primary-color); color: var(--primary-color); font-weight: 600; }
-      .main-content { display: flex; flex-grow: 1; overflow: hidden; }
-      .sidebar {
-          width: var(--sidebar-width); background-color: var(--sidebar-bg); padding: 10px;
-          border-right: 1px solid var(--border-color); display: flex; flex-direction: column;
-          overflow-y: auto; flex-shrink: 0;
-      }
-      .sidebar-item {
-          padding: 12px 15px; border-radius: 6px; cursor: pointer;
-          margin-bottom: 5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      }
-      .sidebar-item:hover { background-color: var(--hover-bg); }
-      .sidebar-item.active { background-color: var(--active-bg); color: var(--active-text); }
-      .sidebar-item.new { color: var(--primary-color); border: 1px dashed var(--primary-color); text-align: center; }
-      .content-area { flex-grow: 1; padding: 30px 0; overflow-y: auto; }
-      .form-container {
-          max-width: 960px;
-          margin: 0 auto;
-          padding: 0 20px;
-      }
-      .form-group { margin-bottom: 20px; }
-      label { display: block; font-weight: 600; margin-bottom: 8px; }
-      input[type="text"], input[type="password"], input[type="number"], textarea {
-          width: 100%; padding: 10px; border: 1px solid var(--border-color);
-          border-radius: 4px; font-size: 14px; box-sizing: border-box;
-      }
-      textarea { height: 200px; font-family: "SF Mono", "Fira Code", monospace; resize: vertical; }
-      .token-group { display: flex; align-items: center; gap: 10px; }
-      .token-group input { flex-grow: 1; }
-      .checkbox-group { display: flex; align-items: center; }
-      .checkbox-group input { margin-right: 10px; width: auto; }
-      .btn {
-          padding: 10px 20px; font-size: 16px; border: none; border-radius: 5px;
-          cursor: pointer; transition: background-color 0.2s;
-      }
-      .btn-sm { padding: 5px 10px; font-size: 14px; }
-      .btn-primary { background-color: var(--primary-color); color: #fff; }
-      .btn-primary:hover { background-color: #0056b3; }
-      .btn-danger { background-color: var(--danger-color); color: #fff; }
-      .btn-danger:hover { background-color: #c82333; }
-      .btn-secondary { background-color: #6c757d; color: #fff; }
-      .btn-secondary:hover { background-color: #5a6268; }
-      .actions { display: flex; justify-content: space-between; margin-top: 20px; gap: 10px; }
-      .actions-center { justify-content: center; }
-      #toast {
-          position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-          padding: 10px 20px; background-color: rgba(0,0,0,0.7); color: white;
-          border-radius: 5px; z-index: 1001; opacity: 0; transition: opacity 0.5s;
-          max-width: 90vw; text-align: center;
-      }
-      #toast.show { opacity: 1; }
-      .modal-overlay {
-          position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-          background-color: rgba(0, 0, 0, 0.5); z-index: 1000;
-          display: flex; align-items: center; justify-content: center;
-          padding: 20px; box-sizing: border-box;
-      }
-      .modal-box {
-          background: var(--card-bg); padding: 25px; border-radius: 8px;
-          box-shadow: 0 5px 15px rgba(0,0,0,0.3); width: 90%; max-width: 400px;
-      }
-      .modal-box h2 { margin-top: 0; }
-      .modal-actions { margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px; }
-      .spinner {
-          border: 4px solid #f3f3f3; border-top: 4px solid var(--primary-color);
-          border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite;
-      }
-      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-      .loading-container { display: flex; align-items: center; justify-content: center; height: 100%; gap: 10px; font-size: 18px; color: #6c757d; }
-      .mobile-menu-btn {
-          display: none;
-          background: none;
-          border: none;
-          font-size: 18px;
-          cursor: pointer;
-          padding: 8px;
-      }
-      /* 移动端导航菜单 */
+    }
+
+    .loading-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 10px;
+      font-size: 18px;
+      color: var(--muted-text-color);
+    }
+
+    .mobile-menu-btn {
+      display: none;
+      background: none;
+      border: none;
+      font-size: 18px;
+      color: var(--text-color);
+      cursor: pointer;
+      padding: 8px;
+    }
+
+    .theme-toggle {
+      min-width: 76px;
+    }
+
+    /* 移动端导航菜单 */
+    .mobile-nav {
+      display: none;
+    }
+
+    /* 响应式设计 */
+    @media (max-width: 768px) {
       .mobile-nav {
-          display: none;
+        display: block;
       }
 
-      /* 响应式设计 */
-      @media (max-width: 768px) {
-          .mobile-nav {
-              display: block;
-          }
-          .header {
-              padding: 0 15px;
-              height: 50px;
-          }
-          .header h1 {
-              font-size: 18px;
-          }
-          .header-left {
-              gap: 10px;
-          }
-          .nav {
-              display: none;
-          }
-          .mobile-menu-btn {
-              display: block;
-          }
-          .main-content {
-              position: relative;
-          }
-          .sidebar {
-              position: fixed;
-              top: 50px;
-              left: -100%;
-              height: calc(100vh - 50px);
-              z-index: 100;
-              transition: left 0.3s ease;
-              box-shadow: 2px 0 10px rgba(0,0,0,0.1);
-              width: var(--sidebar-width);
-          }
-          .sidebar.open {
-              left: 0;
-          }
-          .content-area {
-              padding: 20px 0;
-              width: 100%;
-          }
-          .form-container {
-              padding: 0 15px;
-          }
-          .token-group {
-              flex-direction: column;
-              align-items: stretch;
-              gap: 10px;
-          }
-          .actions {
-              flex-direction: column;
-              gap: 10px;
-          }
-          .modal-box {
-              padding: 20px;
-              margin: 20px;
-          }
-          .modal-actions {
-              flex-direction: column;
-              gap: 10px;
-          }
-          .btn {
-              width: 100%;
-              text-align: center;
-          }
-          .header .btn {
-              width: auto;
-          }
+      .header {
+        padding: 0 15px;
+        height: 50px;
       }
-      @media (max-width: 480px) {
-          .header {
-              padding: 0 10px;
-          }
-          .form-container {
-              padding: 0 10px;
-          }
-          .sidebar {
-              left: -100%;
-          }
-          .sidebar.open {
-              left: 0;
-          }
-          textarea {
-              height: 150px;
-          }
+
+      .header h1 {
+        font-size: 18px;
       }
-      /* 平板设备适配 */
-      @media (min-width: 769px) and (max-width: 1024px) {
-          .sidebar {
-              width: 240px;
-          }
-          .form-container {
-              max-width: 800px;
-          }
+
+      .header-left {
+        gap: 10px;
       }
-      .sidebar-overlay {
-          display: none;
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background-color: rgba(0, 0, 0, 0.5);
-          z-index: 99;
+
+      .nav {
+        display: none;
       }
-      @media (max-width: 768px) {
-          .sidebar-overlay.show {
-              display: block;
-          }
+
+      .mobile-menu-btn {
+        display: block;
       }
+
+      .main-content {
+        position: relative;
+      }
+
+      .sidebar {
+        position: fixed;
+        top: 50px;
+        left: -100%;
+        height: calc(100vh - 50px);
+        z-index: 100;
+        transition: left 0.3s ease;
+        box-shadow: 2px 0 10px var(--shadow-color);
+        width: var(--sidebar-width);
+      }
+
+      .sidebar.open {
+        left: 0;
+      }
+
+      .content-area {
+        padding: 20px 0;
+        width: 100%;
+      }
+
+      .form-container {
+        padding: 0 15px;
+      }
+
+      .settings-grid {
+        grid-template-columns: 1fr;
+        gap: 20px;
+      }
+
+      .actions {
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .modal-box {
+        padding: 20px;
+        margin: 20px;
+      }
+
+      .modal-actions {
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .btn {
+        width: 100%;
+        text-align: center;
+      }
+
+      .header .btn {
+        width: auto;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .header {
+        padding: 0 10px;
+      }
+
+      .form-container {
+        padding: 0 10px;
+      }
+
+      .sidebar {
+        left: -100%;
+      }
+
+      .sidebar.open {
+        left: 0;
+      }
+
+      textarea {
+        height: 150px;
+      }
+    }
+
+    /* 平板设备适配 */
+    @media (min-width: 769px) and (max-width: 1024px) {
+      .sidebar {
+        width: 240px;
+      }
+
+      .form-container {
+        max-width: 800px;
+      }
+    }
+
+    .sidebar-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: var(--overlay-bg);
+      z-index: 99;
+    }
+
+    @media (max-width: 768px) {
+      .sidebar-overlay.show {
+        display: block;
+      }
+    }
   </style>
+</head>
+<body>
+  <div id="app">
+    <div class="loading-container">
+      <div class="spinner"></div>
+      <span>正在加载应用数据...</span>
+    </div>
+  </div>
+  <div id="modal-container"></div>
+  <div id="toast"></div>
 
-    </head>
-    <body>
-        <div id="app">
-            <div class="loading-container">
-                <div class="spinner"></div>
-                <span>正在加载应用数据...</span>
-            </div>
-        </div>
-        <div id="modal-container"></div>
-        <div id="toast"></div>
-
-        <script src='/admin/js/index.js'></script>
-    </body>
-    </html>
+  <script src="/admin/js/index.js"></script>
+</body>
+</html>

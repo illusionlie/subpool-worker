@@ -6,7 +6,8 @@ const App = {
     currentView: 'subscriptions',
     isNewGroup: false,
     confirmPromise: null,
-    confirmMessage: ''
+    confirmMessage: '',
+    theme: 'light'
   },
 
   escapeHtml(unsafe) {
@@ -22,7 +23,57 @@ const App = {
       .replace(/'/g, '&#039;');
   },
 
+  initTheme() {
+    const preferredTheme = this.getPreferredTheme();
+    this.state.theme = preferredTheme;
+    this.applyTheme(preferredTheme);
+  },
+
+  getPreferredTheme() {
+    let storedTheme;
+
+    try {
+      storedTheme = localStorage.getItem('subpool-theme');
+    } catch (_err) {
+      storedTheme = null;
+    }
+
+    if (storedTheme === 'light' || storedTheme === 'dark') {
+      return storedTheme;
+    }
+
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  },
+
+  applyTheme(theme) {
+    const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', normalizedTheme);
+    this.state.theme = normalizedTheme;
+
+    try {
+      localStorage.setItem('subpool-theme', normalizedTheme);
+    } catch (_err) {
+      // ignore storage errors in private mode
+    }
+  },
+
+  toggleTheme() {
+    const nextTheme = this.state.theme === 'dark' ? 'light' : 'dark';
+    this.applyTheme(nextTheme);
+
+    const toggleButton = document.querySelector('[data-action="toggle-theme"]');
+
+    if (toggleButton) {
+      toggleButton.textContent = this.getThemeToggleLabel();
+    }
+  },
+
+  getThemeToggleLabel() {
+    return this.state.theme === 'dark' ? '☀️ 亮色' : '🌙 暗色';
+  },
+
   async init() {
+    this.initTheme();
     this.cache = {
       app: document.getElementById('app'),
       toast: document.getElementById('toast'),
@@ -149,6 +200,9 @@ const App = {
         break;
       case 'close-sidebar':
         this.closeSidebar();
+        break;
+      case 'toggle-theme':
+        this.toggleTheme();
         break;
       case 'navigate':
         this.state.currentView = actionTarget.dataset.view;
@@ -382,7 +436,10 @@ const App = {
             <button data-action="navigate" data-view="settings" class="${this.state.currentView === 'settings' ? 'active' : ''}">全局设置</button>
           </nav>
         </div>
-        <button class="btn btn-secondary btn-sm" data-action="logout">登出</button>
+        <div class="header-actions">
+          <button class="btn btn-secondary btn-sm theme-toggle" data-action="toggle-theme" aria-label="切换亮暗模式">${this.getThemeToggleLabel()}</button>
+          <button class="btn btn-secondary btn-sm" data-action="logout">登出</button>
+        </div>
       </header>
       <main class="main-content">
         <div class="sidebar-overlay" data-action="close-sidebar"></div>
@@ -509,10 +566,10 @@ const App = {
 
   renderSettingsForm(cfg) {
     return `
-      <div class="form-container" style="max-width: 1200px; padding: 20px;">
+      <div class="form-container settings-form-container">
         <form id="settings-form">
-          <h2 style="text-align: center; margin-bottom: 30px;">全局设置</h2>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: start;">
+          <h2 class="settings-title">全局设置</h2>
+          <div class="settings-grid">
             <div class="settings-column">
               <fieldset>
                 <legend>安全设置</legend>
@@ -534,17 +591,17 @@ const App = {
                 <div class="form-group">
                   <label for="failed-ban-max-attempts">最大失败次数</label>
                   <input type="number" id="failed-ban-max-attempts" value="${cfg.failedBan?.maxAttempts ?? 5}" min="1" max="100">
-                  <small style="color: #666; font-size: 12px;">达到此次数后将被临时封禁</small>
+                  <small>达到此次数后将被临时封禁</small>
                 </div>
                 <div class="form-group">
                   <label for="failed-ban-duration">封禁时长 (秒)</label>
                   <input type="number" id="failed-ban-duration" value="${cfg.failedBan?.banDuration ?? 600}" min="60" max="86400">
-                  <small style="color: #666; font-size: 12px;">封禁持续时间，默认600秒(10分钟)</small>
+                  <small>封禁持续时间，默认600秒(10分钟)</small>
                 </div>
                 <div class="form-group">
                   <label for="failed-ban-ttl">失败记录保留时间 (秒)</label>
                   <input type="number" id="failed-ban-ttl" value="${cfg.failedBan?.failedAttemptsTtl ?? 600}" min="60" max="86400">
-                  <small style="color: #666; font-size: 12px;">失败尝试记录的保留时间</small>
+                  <small>失败尝试记录的保留时间</small>
                 </div>
               </fieldset>
             </div>
@@ -577,7 +634,7 @@ const App = {
               </fieldset>
             </div>
           </div>
-          <div class="actions actions-center" style="margin-top: 30px;">
+          <div class="actions actions-center settings-actions">
             <button class="btn btn-primary" data-action="save-settings">保存设置</button>
           </div>
         </form>
