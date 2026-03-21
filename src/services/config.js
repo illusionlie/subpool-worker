@@ -2,7 +2,6 @@ import { KVService } from './kv.js';
 
 // 定义一套基础的默认配置
 const DEFAULT_CONFIG = {
-  adminPassword: 'admin_password',
   blockBots: true,
   fileName: 'subpool-worker',
   subUpdateTime: 4,

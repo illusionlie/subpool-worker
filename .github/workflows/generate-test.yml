@@ -51,9 +51,9 @@ jobs:
         run: |
           sed -e "s/__WORKER_NAME__/sub-pool-worker-test-${GITHUB_SHA}/g" \
             -e "s/__KV_NAMESPACE_ID__/00000000000000000000000000000000/g" \
-            -e "s/__ADMIN_PASSWORD__/admin-password/g" \
             -e "s/__JWT_SECRET__/jwt-secret/g" \
             -e "s/__DEBUG_SECRET__/debug-secret/g" \
+            -e "s/__INIT_SECRET__/init-secret/g" \
             wrangler.toml.example > wrangler.toml
 
       - name: Check deploy command (dry run)

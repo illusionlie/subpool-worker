@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>初始化管理员密码</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      background-color: #f0f2f5;
+    }
+
+    .init-box {
+      background: #fff;
+      padding: 40px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      width: 400px;
+      max-width: calc(100vw - 32px);
+      box-sizing: border-box;
+    }
+
+    h1 {
+      text-align: center;
+      margin-top: 0;
+      margin-bottom: 10px;
+      font-size: 24px;
+    }
+
+    .desc {
+      text-align: center;
+      color: #666;
+      margin-bottom: 24px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    input[type="password"] {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #d9d9d9;
+      border-radius: 4px;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      border-radius: 4px;
+      border: none;
+      background-color: #007bff;
+      color: white;
+      cursor: pointer;
+    }
+
+    .btn:disabled {
+      opacity: 0.75;
+      cursor: not-allowed;
+    }
+
+    .message {
+      text-align: center;
+      min-height: 1.2em;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+
+    .error {
+      color: #dc3545;
+    }
+
+    .success {
+      color: #28a745;
+    }
+  </style>
+</head>
+<body>
+  <div class="init-box">
+    <h1>首次初始化</h1>
+    <p class="desc">请设置管理员密码。设置成功后将自动进入后台。</p>
+    <form id="init-form">
+      <div class="form-group">
+        <input type="password" id="init-secret" placeholder="请输入初始化密钥" required autofocus>
+      </div>
+      <div class="form-group">
+        <input type="password" id="password" placeholder="请输入密码（至少 6 位）" minlength="6" required>
+      </div>
+      <div class="form-group">
+        <input type="password" id="confirm-password" placeholder="请再次输入密码" minlength="6" required>
+      </div>
+      <button type="submit" class="btn">初始化并进入后台</button>
+      <p id="message" class="message"></p>
+    </form>
+  </div>
+
+  <script>
+    const form = document.getElementById('init-form');
+    const initSecretInput = document.getElementById('init-secret');
+    const passwordInput = document.getElementById('password');
+    const confirmPasswordInput = document.getElementById('confirm-password');
+    const message = document.getElementById('message');
+
+    function setMessage(text, type = 'error') {
+      message.textContent = text;
+      message.className = `message ${type}`;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      setMessage('');
+
+      const initSecret = initSecretInput.value.trim();
+      const password = passwordInput.value.trim();
+      const confirmPassword = confirmPasswordInput.value.trim();
+
+      if (!initSecret) {
+        setMessage('初始化密钥不能为空。');
+        return;
+      }
+
+      if (!password || password.length < 6) {
+        setMessage('密码至少需要 6 位。');
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        setMessage('两次输入的密码不一致。');
+        return;
+      }
+
+      const submitButton = form.querySelector('button');
+      submitButton.disabled = true;
+      submitButton.textContent = '初始化中...';
+
+      try {
+        const response = await fetch('/admin/api/init', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Init-Secret': initSecret
+          },
+          body: JSON.stringify({ password, confirmPassword })
+        });
+
+        if (response.ok) {
+          setMessage('初始化成功，正在跳转...', 'success');
+          window.location.href = '/admin';
+          return;
+        }
+
+        const data = await response.json().catch(() => ({}));
+        setMessage(data.error || '初始化失败，请稍后重试。');
+      } catch (_err) {
+        setMessage('网络异常，请稍后重试。');
+      } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = '初始化并进入后台';
+      }
+    });
+  </script>
+</body>
+</html>

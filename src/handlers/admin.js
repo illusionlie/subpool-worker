@@ -4,17 +4,106 @@ import { response, serveAssetResponse } from '../utils.js';
 import { verifyJwt, createJwt, refreshJwt, getAuthCookie, createAuthCookie } from '../services/auth.js';
 import { Router } from 'itty-router';
 
+const INIT_LOCK_KEY = 'admin:init:lock';
+const INIT_LOCK_TTL_SECONDS = 30;
+const INIT_LOCK_MAX_RETRIES = 5;
+const INIT_LOCK_RETRY_DELAY_MS = 120;
+
+function hasConfiguredAdminPassword(config) {
+  const adminPassword = config?.adminPassword;
+  return typeof adminPassword === 'string' && adminPassword.trim().length > 0;
+}
+
+function isAdminInitialized() {
+  return hasConfiguredAdminPassword({ adminPassword: ConfigService.get('adminPassword') });
+}
+
+function isInitSecretConfigured() {
+  const initSecret = ConfigService.getEnv().INIT_SECRET;
+  return typeof initSecret === 'string' && initSecret.trim().length > 0;
+}
+
+function getRequestInitSecret(request, payload) {
+  const headerSecret = request.headers.get('X-Init-Secret');
+  if (typeof headerSecret === 'string' && headerSecret.trim()) {
+    return headerSecret.trim();
+  }
+
+  return typeof payload?.initSecret === 'string' ? payload.initSecret.trim() : '';
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function acquireInitializationLock(lockOwner, logger) {
+  for (let attempt = 0; attempt < INIT_LOCK_MAX_RETRIES; attempt += 1) {
+    const now = Date.now();
+    const existingLock = await KVService.get(INIT_LOCK_KEY);
+
+    if (!existingLock || typeof existingLock.expiresAt !== 'number' || existingLock.expiresAt <= now) {
+      const lockPayload = { owner: lockOwner, expiresAt: now + INIT_LOCK_TTL_SECONDS * 1000 };
+      await KVService.put(INIT_LOCK_KEY, JSON.stringify(lockPayload), { expirationTtl: INIT_LOCK_TTL_SECONDS });
+
+      const confirmedLock = await KVService.get(INIT_LOCK_KEY);
+      if (confirmedLock?.owner === lockOwner) {
+        return true;
+      }
+    }
+
+    if (attempt < INIT_LOCK_MAX_RETRIES - 1) {
+      await wait(INIT_LOCK_RETRY_DELAY_MS);
+    }
+  }
+
+  logger.warn('Failed to acquire admin initialization lock due to concurrent setup attempts.');
+  return false;
+}
+
+async function releaseInitializationLock(lockOwner, logger) {
+  try {
+    const existingLock = await KVService.get(INIT_LOCK_KEY);
+    if (existingLock?.owner === lockOwner) {
+      await KVService.put(
+        INIT_LOCK_KEY,
+        JSON.stringify({ owner: 'released', releasedAt: Date.now() }),
+        { expirationTtl: 1 }
+      );
+    }
+  } catch (err) {
+    logger.error(err, { customMessage: 'Failed to release admin initialization lock' });
+  }
+}
+
+async function readJsonBody(request) {
+  try {
+    return await request.json();
+  } catch {
+    return null;
+  }
+}
+
 // 登录处理器
 async function handleLogin(request, logger) {
-	const { password } = await request.json();
-	const adminPassword = ConfigService.get('adminPassword');
-	const jwtSecret = ConfigService.getEnv().JWT_SECRET;
+  const payload = await readJsonBody(request);
+  const password = typeof payload?.password === 'string' ? payload.password.trim() : '';
+  const adminPassword = ConfigService.get('adminPassword');
+  const jwtSecret = ConfigService.getEnv().JWT_SECRET;
   const failedBan = ConfigService.get('failedBan');
 
-	if (!adminPassword || !jwtSecret) {
-		logger.fatal('Admin password or JWT secret not set on server.');
-		return response.json({ error: 'Admin password or JWT secret not set on server.' }, 500);
-	}
+  if (!isAdminInitialized()) {
+    logger.warn('Login attempted before admin initialization.');
+    return response.json({ error: 'Admin is not initialized. Please complete initial setup first.' }, 403);
+  }
+
+  if (!jwtSecret) {
+    logger.fatal('JWT secret is not set on server.');
+    return response.json({ error: 'JWT secret is not set on server.' }, 500);
+  }
+
+  if (!password) {
+    return response.json({ error: 'Password is required.' }, 400);
+  }
 
 	if (constantTimeCompare(password, adminPassword)) {
 		const token = await createJwt(jwtSecret, {}, logger);
@@ -49,6 +138,84 @@ async function handleLogin(request, logger) {
 	}
 }
 
+async function handleInitialSetup(request, logger) {
+  if (isAdminInitialized()) {
+    logger.warn('Admin initialization attempted after setup is already complete.');
+    return response.json({ error: 'Admin is already initialized.' }, 409);
+  }
+
+  if (!isInitSecretConfigured()) {
+    logger.fatal('INIT_SECRET is not set on server.');
+    return response.json({ error: 'INIT_SECRET is not set on server.' }, 500);
+  }
+
+  const jwtSecret = ConfigService.getEnv().JWT_SECRET;
+  if (!jwtSecret) {
+    logger.fatal('JWT secret is not set on server.');
+    return response.json({ error: 'JWT secret is not set on server.' }, 500);
+  }
+
+  const payload = await readJsonBody(request);
+  const expectedInitSecret = ConfigService.getEnv().INIT_SECRET.trim();
+  const initSecretInput = getRequestInitSecret(request, payload);
+
+  if (!initSecretInput) {
+    return response.json({ error: 'Initialization secret is required.' }, 401);
+  }
+
+  if (!constantTimeCompare(initSecretInput, expectedInitSecret)) {
+    logger.warn('Admin initialization rejected due to invalid initialization secret.');
+    return response.json({ error: 'Invalid initialization secret.' }, 401);
+  }
+
+  const password = typeof payload?.password === 'string' ? payload.password.trim() : '';
+  const confirmPassword = typeof payload?.confirmPassword === 'string' ? payload.confirmPassword.trim() : '';
+
+  if (!password || password.length < 6) {
+    return response.json({ error: 'Password must be at least 6 characters.' }, 400);
+  }
+
+  if (!confirmPassword) {
+    return response.json({ error: 'Please confirm your password.' }, 400);
+  }
+
+  if (password !== confirmPassword) {
+    return response.json({ error: 'Passwords do not match.' }, 400);
+  }
+
+  const lockOwner = crypto.randomUUID();
+  const lockAcquired = await acquireInitializationLock(lockOwner, logger);
+  if (!lockAcquired) {
+    return response.json({ error: 'Initialization is already in progress. Please try again shortly.' }, 409);
+  }
+
+  try {
+    const oldConfig = await KVService.getGlobalConfig() || {};
+    if (hasConfiguredAdminPassword(oldConfig)) {
+      return response.json({ error: 'Admin is already initialized.' }, 409);
+    }
+
+    const mergedConfig = deepMerge({}, oldConfig, { adminPassword: password });
+    await KVService.saveGlobalConfig(mergedConfig);
+
+    const latestConfig = await KVService.getGlobalConfig() || {};
+    if (!hasConfiguredAdminPassword(latestConfig) || latestConfig.adminPassword !== password) {
+      logger.warn('Admin initialization conflict detected after config write.', {}, { notify: true });
+      return response.json({ error: 'Initialization conflict detected. Please retry.' }, 409);
+    }
+
+    await ConfigService.init(ConfigService.getEnv(), ConfigService.getCtx());
+
+    const token = await createJwt(jwtSecret, {}, logger);
+    const cookie = createAuthCookie(token, 8 * 60 * 60);
+
+    logger.warn('Admin initial password configured.', {}, { notify: true });
+    return response.json({ success: true }, 200, { 'Set-Cookie': cookie });
+  } finally {
+    await releaseInitializationLock(lockOwner, logger);
+  }
+}
+
 // 登出处理器
 function handleLogout() {
 	const cookie = createAuthCookie('logged_out', 0); // Expire immediately
@@ -70,13 +237,29 @@ async function handleApiRequest(request, url, logger) {
 
   // 保存配置
   router.put('/admin/api/config', async () => {
-    const newConfig = await request.json();
-		// 合并而不是完全替换，防止丢失未在前端展示的配置项
-		const oldConfig = await KVService.getGlobalConfig() || {};
-		const mergedConfig = deepMerge({}, oldConfig, newConfig);
-		await KVService.saveGlobalConfig(mergedConfig);
-		logger.info('Global config updated', {}, { notify: true });
-		return response.json({ success: true });
+    const newConfig = await readJsonBody(request);
+    if (!newConfig || typeof newConfig !== 'object' || Array.isArray(newConfig)) {
+      return response.json({ error: 'Invalid config payload.' }, 400);
+    }
+
+    if ('adminPassword' in newConfig) {
+      const nextPassword = typeof newConfig.adminPassword === 'string'
+        ? newConfig.adminPassword.trim()
+        : '';
+
+      if (!nextPassword) {
+        delete newConfig.adminPassword;
+      } else {
+        newConfig.adminPassword = nextPassword;
+      }
+    }
+
+  // 合并而不是完全替换，防止丢失未在前端展示的配置项
+  const oldConfig = await KVService.getGlobalConfig() || {};
+  const mergedConfig = deepMerge({}, oldConfig, newConfig);
+  await KVService.saveGlobalConfig(mergedConfig);
+  logger.info('Global config updated', {}, { notify: true });
+  return response.json({ success: true });
   });
 
   // 获取所有订阅组
@@ -155,6 +338,10 @@ function isAdminEntryPage(pathname) {
   return pathname === '/admin' || pathname === '/admin/' || pathname === '/admin/index.html';
 }
 
+function isAdminInitPage(pathname) {
+  return pathname === '/admin/init' || pathname === '/admin/init/' || pathname === '/admin/init.html';
+}
+
 // 主处理器
 export async function handleAdminRequest(request, logger) {
 	const url = new URL(request.url);
@@ -169,10 +356,32 @@ export async function handleAdminRequest(request, logger) {
     return response.json({ error: 'ASSETS binding is not configured.' }, 500);
   }
 
-	// 检查是否是登录API的请求，如果是，则直接处理
+  const initialized = isAdminInitialized();
+  const initSecretConfigured = isInitSecretConfigured();
+
+ // 检查是否是公开API请求，如果是，则直接处理
+  router.get('/admin/api/init/status', () => response.json({ initialized, initSecretConfigured }, 200));
+  router.post('/admin/api/init', () => handleInitialSetup(request, logger));
   router.post('/admin/api/login', () => handleLogin(request, logger));
   const routerResponse = await router.fetch(request);
   if (routerResponse) return routerResponse;
+
+  if (!initialized) {
+    if (!initSecretConfigured) {
+      logger.fatal('INIT_SECRET is required before admin initialization.');
+      return response.normal('INIT_SECRET is not configured.', 500, { 'Set-Cookie': createAuthCookie('invalid', 0) }, 'text/plain; charset=utf-8');
+    }
+
+    if (url.pathname.startsWith('/admin/api/')) {
+      return response.json({ error: 'Admin is not initialized. Please complete initial setup first.' }, 403);
+    }
+
+    if (isAdminEntryPage(url.pathname) || isAdminInitPage(url.pathname)) {
+      return fetchAdminAsset(request, '/admin/init.html', logger, 200, { 'Set-Cookie': createAuthCookie('invalid', 0) });
+    }
+
+    return response.normal('Admin is not initialized yet.', 403, { 'Set-Cookie': createAuthCookie('invalid', 0) }, 'text/plain; charset=utf-8');
+  }
 
 	// 验证所有其他 /admin 请求的JWT
 	const token = getAuthCookie(request, logger);
@@ -187,6 +396,10 @@ export async function handleAdminRequest(request, logger) {
 			// 处理API请求
 			return handleApiRequest(request, url, logger);
 		}
+
+      if (isAdminInitPage(url.pathname)) {
+        return fetchAdminAsset(request, '/admin/index.html', logger, 200, { 'Set-Cookie': cookie });
+      }
 
 		  if (isAdminEntryPage(url.pathname)) {
 		    // 管理后台入口始终返回主页面
@@ -203,6 +416,10 @@ export async function handleAdminRequest(request, logger) {
 		  if (url.pathname.startsWith('/admin/api/')) {
 		    return response.json({ error: 'Unauthorized' }, 401, expiredCookieHeaders);
 		  }
+
+      if (isAdminInitPage(url.pathname)) {
+        return fetchAdminAsset(request, '/admin/login.html', logger, 401, expiredCookieHeaders);
+      }
 
 		  if (isAdminEntryPage(url.pathname)) {
 		    return fetchAdminAsset(request, '/admin/login.html', logger, 401, expiredCookieHeaders);
