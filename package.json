@@ -16,7 +16,7 @@
     "@eslint/js": "^10.0.1",
     "eslint": "^10.0.3",
     "globals": "^17.4.0",
-    "wrangler": "^4.59.1"
+    "wrangler": "^4.76.0"
   },
   "dependencies": {
     "itty-router": "^5.0.23"
