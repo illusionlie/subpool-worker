@@ -5,8 +5,7 @@ This file provides guidance to agents when working with code in this repository.
 ## 非显而易见命令/流程
 - `npm run build` 会先执行 `npm ci`，再执行 `wrangler deploy --dry-run --outdir=dist`（CI 的 dry-run 也是走此脚本）。
 - `npm run deploy` 依赖 `npm run build` 后再 `wrangler deploy`（需要先生成 `wrangler.toml`）。
-- GitHub Actions 会用 `wrangler.toml.example` 生成 `wrangler.toml`（替换 `WORKER_NAME`/`CF_KV_NAMESPACE_ID`/`JWT_SECRET`/`DEBUG_SECRET`/`INIT_SECRET`，可选 `CUSTOM_DOMAIN`）。
-- 未配置任何测试/lint 脚本；CI 的 `generate-test` 实际是 dry-run deploy。
+- GitHub Actions 会用 `wrangler.toml.example` 生成 `wrangler.toml`（替换 `WORKER_NAME`/`CF_KV_NAMESPACE_ID`/`DEBUG_SECRET`/`INIT_SECRET`，可选 `CUSTOM_DOMAIN`）。
 
 ## 关键约定/流程（代码中发现）
 - 每次请求都会在路由层调用 `ConfigService.init(env)`，并用 `deepMerge` 将 KV 配置叠加到默认配置（不能直接覆盖整对象）。

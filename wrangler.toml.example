@@ -22,7 +22,6 @@ enabled = true
 head_sampling_rate = 1
 
 [vars]
-JWT_SECRET = "__JWT_SECRET__"
 DEBUG_SECRET = "__DEBUG_SECRET__"
 INIT_SECRET = "__INIT_SECRET__"
 LOG_LEVEL = "info"

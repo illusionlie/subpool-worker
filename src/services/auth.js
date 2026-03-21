@@ -238,7 +238,7 @@ export async function refreshJwt(secret, token, logger) {
   }
 
   try {
-    const payload = await verifyJwt(secret, token);
+    const payload = await verifyJwt(secret, token, logger);
     if (!payload) {
       return null;
     }

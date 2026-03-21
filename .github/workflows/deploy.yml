@@ -33,10 +33,6 @@ jobs:
             echo "::error::Secret CF_KV_NAMESPACE_ID is not set. Please add it to your repository secrets."
             exit 1
           fi
-          if [ -z "${{ secrets.JWT_SECRET }}" ]; then
-            echo "::error::Secret JWT_SECRET is not set. Please add it to your repository secrets."
-            exit 1
-          fi
           if [ -z "${{ secrets.DEBUG_SECRET }}" ]; then
             echo "::error::Secret DEBUG_SECRET is not set. Please add it to your repository secrets."
             exit 1
@@ -79,7 +75,6 @@ jobs:
         run: |
           sed -e "s/__WORKER_NAME__/${{ secrets.WORKER_NAME }}/g" \
             -e "s/__KV_NAMESPACE_ID__/${{ secrets.CF_KV_NAMESPACE_ID }}/g" \
-            -e "s/__JWT_SECRET__/${{ secrets.JWT_SECRET }}/g" \
             -e "s/__DEBUG_SECRET__/${{ secrets.DEBUG_SECRET }}/g" \
             -e "s/__INIT_SECRET__/${{ secrets.INIT_SECRET }}/g" \
             wrangler.toml.example > wrangler.toml

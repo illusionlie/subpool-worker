@@ -323,8 +323,11 @@ const App = {
     };
 
     try {
-      await this.api.saveConfig(newConfig);
-      this.UI.showToast('设置已保存！如果修改了密码，下次登录生效。');
+      const result = await this.api.saveConfig(newConfig);
+      const message = result?.passwordChanged
+        ? '设置已保存！密码已更新，当前登录状态已自动刷新。'
+        : '设置已保存！';
+      this.UI.showToast(message);
       await this.refreshData();
       this.render();
     } catch (error) {

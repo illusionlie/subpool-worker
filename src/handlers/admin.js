@@ -14,6 +14,53 @@ function hasConfiguredAdminPassword(config) {
   return typeof adminPassword === 'string' && adminPassword.trim().length > 0;
 }
 
+function hasConfiguredJwtSecret(config) {
+  const jwtSecret = config?.jwtSecret;
+  return typeof jwtSecret === 'string' && jwtSecret.trim().length > 0;
+}
+
+function getJwtSecretFromConfig() {
+  const jwtSecret = ConfigService.get('jwtSecret');
+  return typeof jwtSecret === 'string' ? jwtSecret.trim() : '';
+}
+
+function generateJwtSecret(byteLength = 48) {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function getOrCreateJwtSecretForInitializedAdmin(logger) {
+  const currentJwtSecret = getJwtSecretFromConfig();
+  if (currentJwtSecret) {
+    return currentJwtSecret;
+  }
+
+  if (!isAdminInitialized()) {
+    return '';
+  }
+
+  const oldConfig = await KVService.getGlobalConfig() || {};
+  if (hasConfiguredJwtSecret(oldConfig)) {
+    await ConfigService.init(ConfigService.getEnv(), ConfigService.getCtx());
+    return getJwtSecretFromConfig();
+  }
+
+  const nextJwtSecret = generateJwtSecret();
+  const mergedConfig = deepMerge({}, oldConfig, { jwtSecret: nextJwtSecret });
+  await KVService.saveGlobalConfig(mergedConfig);
+
+  const latestConfig = await KVService.getGlobalConfig() || {};
+  if (!hasConfiguredJwtSecret(latestConfig)) {
+    logger.fatal('JWT secret regeneration failed for initialized admin.');
+    return '';
+  }
+
+  await ConfigService.init(ConfigService.getEnv(), ConfigService.getCtx());
+  logger.warn('JWT secret was missing and has been regenerated for initialized admin.', {}, { notify: true });
+  return getJwtSecretFromConfig();
+}
+
 function isAdminInitialized() {
   return hasConfiguredAdminPassword({ adminPassword: ConfigService.get('adminPassword') });
 }
@@ -88,7 +135,7 @@ async function handleLogin(request, logger) {
   const payload = await readJsonBody(request);
   const password = typeof payload?.password === 'string' ? payload.password.trim() : '';
   const adminPassword = ConfigService.get('adminPassword');
-  const jwtSecret = ConfigService.getEnv().JWT_SECRET;
+  const jwtSecret = await getOrCreateJwtSecretForInitializedAdmin(logger);
   const failedBan = ConfigService.get('failedBan');
 
   if (!isAdminInitialized()) {
@@ -149,12 +196,6 @@ async function handleInitialSetup(request, logger) {
     return response.json({ error: 'INIT_SECRET is not set on server.' }, 500);
   }
 
-  const jwtSecret = ConfigService.getEnv().JWT_SECRET;
-  if (!jwtSecret) {
-    logger.fatal('JWT secret is not set on server.');
-    return response.json({ error: 'JWT secret is not set on server.' }, 500);
-  }
-
   const payload = await readJsonBody(request);
   const expectedInitSecret = ConfigService.getEnv().INIT_SECRET.trim();
   const initSecretInput = getRequestInitSecret(request, payload);
@@ -195,16 +236,31 @@ async function handleInitialSetup(request, logger) {
       return response.json({ error: 'Admin is already initialized.' }, 409);
     }
 
-    const mergedConfig = deepMerge({}, oldConfig, { adminPassword: password });
+    const nextJwtSecret = generateJwtSecret();
+    const mergedConfig = deepMerge({}, oldConfig, {
+      adminPassword: password,
+      jwtSecret: nextJwtSecret
+    });
     await KVService.saveGlobalConfig(mergedConfig);
 
     const latestConfig = await KVService.getGlobalConfig() || {};
-    if (!hasConfiguredAdminPassword(latestConfig) || latestConfig.adminPassword !== password) {
+    if (
+      !hasConfiguredAdminPassword(latestConfig)
+      || latestConfig.adminPassword !== password
+      || !hasConfiguredJwtSecret(latestConfig)
+      || latestConfig.jwtSecret !== nextJwtSecret
+    ) {
       logger.warn('Admin initialization conflict detected after config write.', {}, { notify: true });
       return response.json({ error: 'Initialization conflict detected. Please retry.' }, 409);
     }
 
     await ConfigService.init(ConfigService.getEnv(), ConfigService.getCtx());
+
+    const jwtSecret = getJwtSecretFromConfig();
+    if (!jwtSecret) {
+      logger.fatal('JWT secret is missing after initialization.');
+      return response.json({ error: 'JWT secret is missing after initialization.' }, 500);
+    }
 
     const token = await createJwt(jwtSecret, {}, logger);
     const cookie = createAuthCookie(token, 8 * 60 * 60);
@@ -232,7 +288,10 @@ async function handleApiRequest(request, url, logger) {
   // 获取配置
   router.get('/admin/api/config', async () => {
     const config = await KVService.getGlobalConfig() || ConfigService.get();
-		return response.json(config);
+    const safeConfig = { ...config };
+    delete safeConfig.adminPassword;
+    delete safeConfig.jwtSecret;
+    return response.json(safeConfig);
   });
 
   // 保存配置
@@ -242,6 +301,11 @@ async function handleApiRequest(request, url, logger) {
       return response.json({ error: 'Invalid config payload.' }, 400);
     }
 
+    if ('jwtSecret' in newConfig) {
+      delete newConfig.jwtSecret;
+    }
+
+    let passwordChanged = false;
     if ('adminPassword' in newConfig) {
       const nextPassword = typeof newConfig.adminPassword === 'string'
         ? newConfig.adminPassword.trim()
@@ -250,16 +314,46 @@ async function handleApiRequest(request, url, logger) {
       if (!nextPassword) {
         delete newConfig.adminPassword;
       } else {
+        if (nextPassword.length < 6) {
+          return response.json({ error: 'Password must be at least 6 characters.' }, 400);
+        }
+
+        const currentPassword = ConfigService.get('adminPassword');
+        passwordChanged = !hasConfiguredAdminPassword({ adminPassword: currentPassword })
+          || !constantTimeCompare(nextPassword, currentPassword);
+
         newConfig.adminPassword = nextPassword;
+
+        if (passwordChanged) {
+          newConfig.jwtSecret = generateJwtSecret();
+        }
       }
     }
 
-  // 合并而不是完全替换，防止丢失未在前端展示的配置项
-  const oldConfig = await KVService.getGlobalConfig() || {};
-  const mergedConfig = deepMerge({}, oldConfig, newConfig);
-  await KVService.saveGlobalConfig(mergedConfig);
-  logger.info('Global config updated', {}, { notify: true });
-  return response.json({ success: true });
+    // 合并而不是完全替换，防止丢失未在前端展示的配置项
+    const oldConfig = await KVService.getGlobalConfig() || {};
+    const mergedConfig = deepMerge({}, oldConfig, newConfig);
+    await KVService.saveGlobalConfig(mergedConfig);
+
+    const responseHeaders = {};
+    if (passwordChanged) {
+      const jwtSecret = typeof mergedConfig.jwtSecret === 'string'
+        ? mergedConfig.jwtSecret.trim()
+        : '';
+
+      if (!jwtSecret) {
+        logger.fatal('JWT secret is missing after password update.');
+        return response.json({ error: 'JWT secret is missing after password update.' }, 500);
+      }
+
+      const token = await createJwt(jwtSecret, {}, logger);
+      responseHeaders['Set-Cookie'] = createAuthCookie(token, 8 * 60 * 60);
+      logger.warn('Admin password updated and JWT secret rotated.', {}, { notify: true });
+    } else {
+      logger.info('Global config updated', {}, { notify: true });
+    }
+
+    return response.json({ success: true, passwordChanged }, 200, responseHeaders);
   });
 
   // 获取所有订阅组
@@ -346,11 +440,7 @@ function isAdminInitPage(pathname) {
 export async function handleAdminRequest(request, logger) {
 	const url = new URL(request.url);
   const router = Router();
-	const { JWT_SECRET: jwtSecret, ASSETS } = ConfigService.getEnv();
-	if (!jwtSecret) {
-		logger.fatal('JWT_SECRET is not configured.');
-		return response.json({ error: 'JWT_SECRET is not configured.' }, 500);
-	}
+	const { ASSETS } = ConfigService.getEnv();
   if (!ASSETS) {
     logger.fatal('ASSETS binding is not configured.');
     return response.json({ error: 'ASSETS binding is not configured.' }, 500);
@@ -382,6 +472,16 @@ export async function handleAdminRequest(request, logger) {
 
     return response.normal('Admin is not initialized yet.', 403, { 'Set-Cookie': createAuthCookie('invalid', 0) }, 'text/plain; charset=utf-8');
   }
+
+	 const jwtSecret = await getOrCreateJwtSecretForInitializedAdmin(logger);
+	 if (!jwtSecret) {
+	   logger.fatal('JWT secret is not configured for initialized admin.');
+	   return response.json(
+	     { error: 'JWT secret is not configured for initialized admin.' },
+	     500,
+	     { 'Set-Cookie': createAuthCookie('invalid', 0) }
+	   );
+	 }
 
 	// 验证所有其他 /admin 请求的JWT
 	const token = getAuthCookie(request, logger);
