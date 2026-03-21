@@ -5,7 +5,7 @@ import { verifyJwt, createJwt, refreshJwt, getAuthCookie, createAuthCookie } fro
 import { Router } from 'itty-router';
 
 const INIT_LOCK_KEY = 'admin:init:lock';
-const INIT_LOCK_TTL_SECONDS = 30;
+const INIT_LOCK_TTL_SECONDS = 60;
 const INIT_LOCK_MAX_RETRIES = 5;
 const INIT_LOCK_RETRY_DELAY_MS = 120;
 
