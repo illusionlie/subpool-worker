@@ -9,9 +9,103 @@ const INIT_LOCK_TTL_SECONDS = 60;
 const INIT_LOCK_MAX_RETRIES = 5;
 const INIT_LOCK_RETRY_DELAY_MS = 120;
 
-function hasConfiguredAdminPassword(config) {
+const LEGACY_PASSWORD_HASH_ALGORITHM = 'SHA-256';
+const PASSWORD_DERIVATION_ALGORITHM = 'PBKDF2';
+const PASSWORD_DERIVATION_HASH = 'SHA-256';
+const PASSWORD_SALT_BYTE_LENGTH = 16;
+const PASSWORD_HASH_ITERATIONS = 210000;
+const PASSWORD_HASH_BIT_LENGTH = 256;
+const textEncoder = new TextEncoder();
+
+function parseAdminPasswordHashIterations(value) {
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    const parsedValue = Number.parseInt(value.trim(), 10);
+    if (Number.isInteger(parsedValue) && parsedValue > 0) {
+      return parsedValue;
+    }
+  }
+
+  return 0;
+}
+
+function hasConfiguredLegacyAdminPassword(config) {
   const adminPassword = config?.adminPassword;
   return typeof adminPassword === 'string' && adminPassword.trim().length > 0;
+}
+
+function hasConfiguredHashedAdminPassword(config) {
+  const adminPasswordHash = config?.adminPasswordHash;
+  const adminPasswordSalt = config?.adminPasswordSalt;
+
+  return typeof adminPasswordHash === 'string'
+    && adminPasswordHash.trim().length > 0
+    && typeof adminPasswordSalt === 'string'
+    && adminPasswordSalt.trim().length > 0;
+}
+
+function hasConfiguredPbkdf2AdminPassword(config) {
+  const adminPasswordHashIterations = parseAdminPasswordHashIterations(config?.adminPasswordHashIterations);
+  return hasConfiguredHashedAdminPassword(config) && adminPasswordHashIterations > 0;
+}
+
+function hasConfiguredLegacySha256AdminPassword(config) {
+  return hasConfiguredHashedAdminPassword(config) && !hasConfiguredPbkdf2AdminPassword(config);
+}
+
+function getPersistedPasswordCredentialsState(config) {
+  if (hasConfiguredPbkdf2AdminPassword(config)) {
+    return {
+      hasHashedCredentials: true,
+      isPbkdf2: true,
+      isLegacySha256: false,
+      normalizedIterations: parseAdminPasswordHashIterations(config?.adminPasswordHashIterations)
+    };
+  }
+
+  if (hasConfiguredLegacySha256AdminPassword(config)) {
+    return {
+      hasHashedCredentials: true,
+      isPbkdf2: false,
+      isLegacySha256: true,
+      normalizedIterations: 0
+    };
+  }
+
+  return {
+    hasHashedCredentials: false,
+    isPbkdf2: false,
+    isLegacySha256: false,
+    normalizedIterations: 0
+  };
+}
+
+function normalizePersistedAdminCredentialFields(config) {
+  const passwordCredentialsState = getPersistedPasswordCredentialsState(config);
+  if (!passwordCredentialsState.hasHashedCredentials) {
+    return config;
+  }
+
+  config.adminPassword = '';
+
+  if (passwordCredentialsState.isPbkdf2) {
+    config.adminPasswordHashIterations = passwordCredentialsState.normalizedIterations;
+  } else {
+    delete config.adminPasswordHashIterations;
+  }
+
+  return config;
+}
+
+function requiresAdminPasswordStorageUpgrade(config) {
+  return hasConfiguredLegacyAdminPassword(config) || hasConfiguredLegacySha256AdminPassword(config);
+}
+
+function hasConfiguredAdminPassword(config) {
+  return hasConfiguredHashedAdminPassword(config) || hasConfiguredLegacyAdminPassword(config);
 }
 
 function hasConfiguredJwtSecret(config) {
@@ -24,10 +118,136 @@ function getJwtSecretFromConfig() {
   return typeof jwtSecret === 'string' ? jwtSecret.trim() : '';
 }
 
-function generateJwtSecret(byteLength = 48) {
+function generateRandomHex(byteLength = 32) {
   const bytes = new Uint8Array(byteLength);
   crypto.getRandomValues(bytes);
   return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function generateJwtSecret(byteLength = 48) {
+  return generateRandomHex(byteLength);
+}
+
+function generatePasswordSalt(byteLength = PASSWORD_SALT_BYTE_LENGTH) {
+  return generateRandomHex(byteLength);
+}
+
+function normalizeAdminCredentials(config) {
+  return {
+    adminPassword: typeof config?.adminPassword === 'string' ? config.adminPassword.trim() : '',
+    adminPasswordHash: typeof config?.adminPasswordHash === 'string' ? config.adminPasswordHash.trim() : '',
+    adminPasswordSalt: typeof config?.adminPasswordSalt === 'string' ? config.adminPasswordSalt.trim() : '',
+    adminPasswordHashIterations: parseAdminPasswordHashIterations(config?.adminPasswordHashIterations)
+  };
+}
+
+function getRuntimeAdminCredentials() {
+  return normalizeAdminCredentials({
+    adminPassword: ConfigService.get('adminPassword'),
+    adminPasswordHash: ConfigService.get('adminPasswordHash'),
+    adminPasswordSalt: ConfigService.get('adminPasswordSalt'),
+    adminPasswordHashIterations: ConfigService.get('adminPasswordHashIterations')
+  });
+}
+
+async function hashAdminPasswordWithLegacySha256(password, salt) {
+  const normalizedPassword = typeof password === 'string' ? password.trim() : '';
+  const normalizedSalt = typeof salt === 'string' ? salt.trim() : '';
+  if (!normalizedPassword || !normalizedSalt) {
+    return '';
+  }
+
+  const hashBuffer = await crypto.subtle.digest(
+    LEGACY_PASSWORD_HASH_ALGORITHM,
+    textEncoder.encode(`${normalizedSalt}:${normalizedPassword}`)
+  );
+
+  return Array.from(new Uint8Array(hashBuffer), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function hashAdminPasswordWithPbkdf2(password, salt, iterations = PASSWORD_HASH_ITERATIONS) {
+  const normalizedPassword = typeof password === 'string' ? password.trim() : '';
+  const normalizedSalt = typeof salt === 'string' ? salt.trim() : '';
+  const normalizedIterations = parseAdminPasswordHashIterations(iterations);
+
+  if (!normalizedPassword || !normalizedSalt || normalizedIterations <= 0) {
+    return '';
+  }
+
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    textEncoder.encode(normalizedPassword),
+    { name: PASSWORD_DERIVATION_ALGORITHM },
+    false,
+    ['deriveBits']
+  );
+
+  const hashBuffer = await crypto.subtle.deriveBits(
+    {
+      name: PASSWORD_DERIVATION_ALGORITHM,
+      salt: textEncoder.encode(normalizedSalt),
+      iterations: normalizedIterations,
+      hash: PASSWORD_DERIVATION_HASH
+    },
+    keyMaterial,
+    PASSWORD_HASH_BIT_LENGTH
+  );
+
+  return Array.from(new Uint8Array(hashBuffer), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function buildAdminPasswordCredentials(password) {
+  const normalizedPassword = typeof password === 'string' ? password.trim() : '';
+  if (!normalizedPassword) {
+    throw new Error('Admin password is required.');
+  }
+
+  const adminPasswordSalt = generatePasswordSalt();
+  const adminPasswordHashIterations = PASSWORD_HASH_ITERATIONS;
+  const adminPasswordHash = await hashAdminPasswordWithPbkdf2(
+    normalizedPassword,
+    adminPasswordSalt,
+    adminPasswordHashIterations
+  );
+  if (!adminPasswordHash) {
+    throw new Error('Failed to generate admin password hash.');
+  }
+
+  return {
+    adminPasswordHash,
+    adminPasswordSalt,
+    adminPasswordHashIterations,
+    adminPassword: ''
+  };
+}
+
+async function isValidAdminPassword(password, config) {
+  const normalizedPassword = typeof password === 'string' ? password.trim() : '';
+  if (!normalizedPassword) {
+    return false;
+  }
+
+  const credentials = normalizeAdminCredentials(config);
+
+  if (hasConfiguredPbkdf2AdminPassword(credentials)) {
+    const computedHash = await hashAdminPasswordWithPbkdf2(
+      normalizedPassword,
+      credentials.adminPasswordSalt,
+      credentials.adminPasswordHashIterations
+    );
+    return Boolean(computedHash) && constantTimeCompare(computedHash, credentials.adminPasswordHash);
+  }
+
+  if (hasConfiguredLegacySha256AdminPassword(credentials)) {
+    const computedHash = await hashAdminPasswordWithLegacySha256(normalizedPassword, credentials.adminPasswordSalt);
+    return Boolean(computedHash) && constantTimeCompare(computedHash, credentials.adminPasswordHash);
+  }
+
+  if (hasConfiguredLegacyAdminPassword(credentials)) {
+    return constantTimeCompare(normalizedPassword, credentials.adminPassword);
+  }
+
+  return false;
 }
 
 async function getOrCreateJwtSecretForInitializedAdmin(logger) {
@@ -62,7 +282,7 @@ async function getOrCreateJwtSecretForInitializedAdmin(logger) {
 }
 
 function isAdminInitialized() {
-  return hasConfiguredAdminPassword({ adminPassword: ConfigService.get('adminPassword') });
+  return hasConfiguredAdminPassword(getRuntimeAdminCredentials());
 }
 
 function isInitSecretConfigured() {
@@ -130,11 +350,52 @@ async function readJsonBody(request) {
   }
 }
 
+function getLoginRequestIp(request) {
+  if (!request || !request.headers) {
+    return 'unknown';
+  }
+
+  return request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || 'unknown';
+}
+
+async function getBlockedLoginResponse(request, failedBan, logger) {
+  if (!failedBan?.enabled) {
+    return null;
+  }
+
+  const ip = getLoginRequestIp(request);
+
+  const banned = await KVService.get(`banned::${ip}`);
+  if (banned) {
+    logger.warn('Banned IP attempted login', {}, { notify: true });
+    return response.json({ error: 'Too many failed attempts, please try again later.' }, 429);
+  }
+
+  return null;
+}
+
+async function recordFailedLoginAttempt(request, failedBan, logger) {
+  if (!failedBan?.enabled) {
+    return null;
+  }
+
+  const ip = getLoginRequestIp(request);
+  const attempts = await KVService.get(`failedAttempts::${ip}`) || 0;
+  if (attempts >= failedBan.maxAttempts) {
+    await KVService.put(`banned::${ip}`, true, { expirationTtl: failedBan.banDuration });
+    logger.warn('Banned IP attempted login', {}, { notify: true });
+    return response.json({ error: 'Too many failed attempts, please try again later.' }, 429);
+  }
+
+  await KVService.put(`failedAttempts::${ip}`, attempts + 1, { expirationTtl: failedBan.failedAttemptsTtl });
+  return null;
+}
+
 // 登录处理器
 async function handleLogin(request, logger) {
   const payload = await readJsonBody(request);
   const password = typeof payload?.password === 'string' ? payload.password.trim() : '';
-  const adminPassword = ConfigService.get('adminPassword');
+  const adminCredentials = getRuntimeAdminCredentials();
   const jwtSecret = await getOrCreateJwtSecretForInitializedAdmin(logger);
   const failedBan = ConfigService.get('failedBan');
 
@@ -152,37 +413,34 @@ async function handleLogin(request, logger) {
     return response.json({ error: 'Password is required.' }, 400);
   }
 
-	if (constantTimeCompare(password, adminPassword)) {
-		const token = await createJwt(jwtSecret, {}, logger);
-		const cookie = createAuthCookie(token, 8 * 60 * 60); // 8 hours
-		logger.info('Admin logged in', {}, { notify: true });
-		return response.json({ success: true }, 200, { 'Set-Cookie': cookie });
-	} else {
-    // 失败登录记录，防止暴力破解
-    if (failedBan.enabled) {
-      const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || 'unknown';
+  const blockedLoginResponse = await getBlockedLoginResponse(request, failedBan, logger);
+  if (blockedLoginResponse) {
+    return blockedLoginResponse;
+  }
 
-      // 检查是否被ban
-      const banned = await KVService.get(`banned::${ip}`);
-      if (banned) {
-        logger.warn('Banned IP attempted login', {}, { notify: true });
-        return response.json({ error: 'Too many failed attempts, please try again later.' }, 429);
-      }
+  let passwordMatched;
+  try {
+    passwordMatched = await isValidAdminPassword(password, adminCredentials);
+  } catch (err) {
+    logger.error(err, { customMessage: 'Failed to validate admin password hash during login.' });
+    return response.json({ error: 'Failed to validate password.' }, 500);
+  }
 
-      // 检查失败次数
-      const attempts = await KVService.get(`failedAttempts::${ip}`) || 0;
-      if (attempts >= failedBan.maxAttempts) {
-        await KVService.put(`banned::${ip}`, true, { expirationTtl: failedBan.banDuration });
-        logger.warn('Banned IP attempted login', {}, { notify: true });
-        return response.json({ error: 'Too many failed attempts, please try again later.' }, 429);
-      } else {
-        await KVService.put(`failedAttempts::${ip}`, attempts + 1, { expirationTtl: failedBan.failedAttemptsTtl });
-      }
-    }
+  if (passwordMatched) {
+    await migrateLegacyAdminPasswordStorageIfNeeded(password, logger);
+    const token = await createJwt(jwtSecret, {}, logger);
+    const cookie = createAuthCookie(token, 8 * 60 * 60); // 8 hours
+    logger.info('Admin logged in', {}, { notify: true });
+    return response.json({ success: true }, 200, { 'Set-Cookie': cookie });
+  }
 
-		logger.warn('Admin login attempt failed', {}, { notify: true });
-		return response.json({ error: 'Invalid password' }, 401);
-	}
+  const failedAttemptResponse = await recordFailedLoginAttempt(request, failedBan, logger);
+  if (failedAttemptResponse) {
+    return failedAttemptResponse;
+  }
+
+  logger.warn('Admin login attempt failed', {}, { notify: true });
+  return response.json({ error: 'Invalid password' }, 401);
 }
 
 async function handleInitialSetup(request, logger) {
@@ -237,16 +495,26 @@ async function handleInitialSetup(request, logger) {
     }
 
     const nextJwtSecret = generateJwtSecret();
+    let passwordCredentials;
+    try {
+      passwordCredentials = await buildAdminPasswordCredentials(password);
+    } catch (err) {
+      logger.error(err, { customMessage: 'Failed to hash admin password during initialization.' });
+      return response.json({ error: 'Failed to initialize admin credentials.' }, 500);
+    }
+
     const mergedConfig = deepMerge({}, oldConfig, {
-      adminPassword: password,
+      ...passwordCredentials,
       jwtSecret: nextJwtSecret
     });
     await KVService.saveGlobalConfig(mergedConfig);
 
     const latestConfig = await KVService.getGlobalConfig() || {};
     if (
-      !hasConfiguredAdminPassword(latestConfig)
-      || latestConfig.adminPassword !== password
+      !hasConfiguredPbkdf2AdminPassword(latestConfig)
+      || latestConfig.adminPasswordHash !== passwordCredentials.adminPasswordHash
+      || latestConfig.adminPasswordSalt !== passwordCredentials.adminPasswordSalt
+      || parseAdminPasswordHashIterations(latestConfig.adminPasswordHashIterations) !== passwordCredentials.adminPasswordHashIterations
       || !hasConfiguredJwtSecret(latestConfig)
       || latestConfig.jwtSecret !== nextJwtSecret
     ) {
@@ -272,6 +540,28 @@ async function handleInitialSetup(request, logger) {
   }
 }
 
+async function migrateLegacyAdminPasswordStorageIfNeeded(password, logger) {
+  const runtimeCredentials = getRuntimeAdminCredentials();
+  if (!requiresAdminPasswordStorageUpgrade(runtimeCredentials)) {
+    return;
+  }
+
+  try {
+    const oldConfig = await KVService.getGlobalConfig() || {};
+    if (!requiresAdminPasswordStorageUpgrade(oldConfig)) {
+      return;
+    }
+
+    const passwordCredentials = await buildAdminPasswordCredentials(password);
+    const mergedConfig = deepMerge({}, oldConfig, passwordCredentials);
+    await KVService.saveGlobalConfig(mergedConfig);
+    await ConfigService.init(ConfigService.getEnv(), ConfigService.getCtx());
+    logger.warn('Legacy admin password storage upgraded to PBKDF2 hash.', {}, { notify: true });
+  } catch (err) {
+    logger.error(err, { customMessage: 'Failed to upgrade legacy admin password storage after login.' });
+  }
+}
+
 // 登出处理器
 function handleLogout() {
 	const cookie = createAuthCookie('logged_out', 0); // Expire immediately
@@ -290,6 +580,9 @@ async function handleApiRequest(request, url, logger) {
     const config = await KVService.getGlobalConfig() || ConfigService.get();
     const safeConfig = { ...config };
     delete safeConfig.adminPassword;
+    delete safeConfig.adminPasswordHash;
+    delete safeConfig.adminPasswordSalt;
+    delete safeConfig.adminPasswordHashIterations;
     delete safeConfig.jwtSecret;
     return response.json(safeConfig);
   });
@@ -305,7 +598,22 @@ async function handleApiRequest(request, url, logger) {
       delete newConfig.jwtSecret;
     }
 
+    if ('adminPasswordHash' in newConfig) {
+      delete newConfig.adminPasswordHash;
+    }
+
+    if ('adminPasswordSalt' in newConfig) {
+      delete newConfig.adminPasswordSalt;
+    }
+
+    if ('adminPasswordHashIterations' in newConfig) {
+      delete newConfig.adminPasswordHashIterations;
+    }
+
     let passwordChanged = false;
+    const currentAdminCredentials = getRuntimeAdminCredentials();
+    const passwordStorageUpgradeRequired = requiresAdminPasswordStorageUpgrade(currentAdminCredentials);
+
     if ('adminPassword' in newConfig) {
       const nextPassword = typeof newConfig.adminPassword === 'string'
         ? newConfig.adminPassword.trim()
@@ -318,21 +626,44 @@ async function handleApiRequest(request, url, logger) {
           return response.json({ error: 'Password must be at least 6 characters.' }, 400);
         }
 
-        const currentPassword = ConfigService.get('adminPassword');
-        passwordChanged = !hasConfiguredAdminPassword({ adminPassword: currentPassword })
-          || !constantTimeCompare(nextPassword, currentPassword);
+        let passwordMatched;
+        try {
+          passwordMatched = await isValidAdminPassword(nextPassword, currentAdminCredentials);
+        } catch (err) {
+          logger.error(err, { customMessage: 'Failed to validate admin password hash during update.' });
+          return response.json({ error: 'Failed to validate password.' }, 500);
+        }
 
-        newConfig.adminPassword = nextPassword;
+        passwordChanged = !hasConfiguredAdminPassword(currentAdminCredentials)
+          || !passwordMatched;
 
-        if (passwordChanged) {
-          newConfig.jwtSecret = generateJwtSecret();
+        const shouldPersistPasswordCredentials = passwordChanged || passwordStorageUpgradeRequired;
+        if (shouldPersistPasswordCredentials) {
+          let passwordCredentials;
+          try {
+            passwordCredentials = await buildAdminPasswordCredentials(nextPassword);
+          } catch (err) {
+            logger.error(err, { customMessage: 'Failed to hash admin password during update.' });
+            return response.json({ error: 'Failed to update admin credentials.' }, 500);
+          }
+
+          newConfig.adminPasswordHash = passwordCredentials.adminPasswordHash;
+          newConfig.adminPasswordSalt = passwordCredentials.adminPasswordSalt;
+          newConfig.adminPasswordHashIterations = passwordCredentials.adminPasswordHashIterations;
+          newConfig.adminPassword = '';
+
+          if (passwordChanged) {
+            newConfig.jwtSecret = generateJwtSecret();
+          }
+        } else {
+          delete newConfig.adminPassword;
         }
       }
     }
 
     // 合并而不是完全替换，防止丢失未在前端展示的配置项
     const oldConfig = await KVService.getGlobalConfig() || {};
-    const mergedConfig = deepMerge({}, oldConfig, newConfig);
+    const mergedConfig = normalizePersistedAdminCredentialFields(deepMerge({}, oldConfig, newConfig));
     await KVService.saveGlobalConfig(mergedConfig);
 
     const responseHeaders = {};
@@ -536,12 +867,36 @@ export async function handleAdminRequest(request, logger) {
  * @returns {boolean} 如果两个字符串相等返回true，否则返回false
  */
 function constantTimeCompare(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') {
+    return false;
+  }
+
   if (a.length !== b.length) {
     return false;
   }
+
   let result = 0;
   for (let i = 0; i < a.length; i++) {
     result |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
+
   return result === 0;
 }
+
+export const __adminInternals = {
+  parseAdminPasswordHashIterations,
+  hasConfiguredLegacyAdminPassword,
+  hasConfiguredHashedAdminPassword,
+  hasConfiguredPbkdf2AdminPassword,
+  hasConfiguredLegacySha256AdminPassword,
+  getPersistedPasswordCredentialsState,
+  normalizePersistedAdminCredentialFields,
+  requiresAdminPasswordStorageUpgrade,
+  normalizeAdminCredentials,
+  hashAdminPasswordWithLegacySha256,
+  hashAdminPasswordWithPbkdf2,
+  buildAdminPasswordCredentials,
+  isValidAdminPassword,
+  getBlockedLoginResponse
+};
+
