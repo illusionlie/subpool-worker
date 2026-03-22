@@ -824,8 +824,19 @@ export async function handleAdminRequest(request, logger) {
 		const newToken = await refreshJwt(jwtSecret, token, logger);
 		const cookie = createAuthCookie(newToken, 8 * 60 * 60); // 8 hours
 		if (url.pathname.startsWith('/admin/api/')) {
-			// 处理API请求
-			return handleApiRequest(request, url, logger);
+			// 处理API请求，并在未显式设置 Set-Cookie 时补写滑动续期 Cookie
+			const apiResponse = await handleApiRequest(request, url, logger);
+			if (apiResponse.headers.has('Set-Cookie')) {
+				return apiResponse;
+			}
+
+			const headers = new Headers(apiResponse.headers);
+			headers.set('Set-Cookie', cookie);
+			return new Response(apiResponse.body, {
+				status: apiResponse.status,
+				statusText: apiResponse.statusText,
+				headers
+			});
 		}
 
       if (isAdminInitPage(url.pathname)) {
