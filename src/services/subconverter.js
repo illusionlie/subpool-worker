@@ -30,7 +30,7 @@ export class SubconverterService {
 
     // 合并、过滤和去重所有原生节点
     const combinedNodes = [...inlineNodes, ...fetchedNodes];
-    let content = applyFilter(combinedNodes.join('\n'), group.filter);
+    let content = applyFilter(combinedNodes.join('\n'), group.filter, logger);
     content = [...new Set(content.split('\n'))].join('\n');
 
     // 如果客户端请求的就是 base64，或者 sub-converter 正在回访我们，直接返回结果
@@ -135,14 +135,14 @@ export class SubconverterService {
           const normalizedContent = this._normalizeBase64ForDecode(content);
           try {
             const decoded = atob(normalizedContent);
-            fetchedNodes.push(applyFilter(decoded, filterConfig));
+            fetchedNodes.push(applyFilter(decoded, filterConfig, logger));
           } catch (error) {
             logger.warn(`Failed to decode base64 content from ${url}`, {
               error: error instanceof Error ? error.message : String(error)
             });
           }
         } else if (content.includes('://')) {
-          fetchedNodes.push(applyFilter(content, filterConfig));
+          fetchedNodes.push(applyFilter(content, filterConfig, logger));
         } else {
           logger.warn(`Unrecognized content from ${url}`);
         }

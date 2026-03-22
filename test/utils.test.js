@@ -55,6 +55,49 @@ test('`applyFilter` 应同时过滤原始规则与 URL 编码规则', () => {
   assert.equal(filtered, 'vmess://keep-me');
 });
 
+test('`applyFilter` 对普通字符串规则应按字面量匹配（转义正则元字符）', () => {
+  const content = [
+    'vmess://literal-a+b-node',
+    'vmess://regex-like-aaab-node',
+    'vmess://keep-me',
+  ].join('\n');
+
+  const filtered = applyFilter(content, {
+    enabled: true,
+    rules: ['a+b'],
+  });
+
+  assert.equal(filtered, [
+    'vmess://regex-like-aaab-node',
+    'vmess://keep-me',
+  ].join('\n'));
+});
+
+test('`applyFilter` 遇到非法规则应跳过并记录 warn，不中断过滤', () => {
+  const logger = {
+    warnCalls: [],
+    warn(...args) {
+      this.warnCalls.push(args);
+    },
+  };
+
+  const content = [
+    'vmess://keep-me',
+    'ss://remove-me',
+  ].join('\n');
+
+  const filtered = applyFilter(content, {
+    enabled: true,
+    rules: ['/(abc/', 'remove-me'],
+  }, logger);
+
+  assert.equal(filtered, 'vmess://keep-me');
+  assert.equal(logger.warnCalls.length, 1);
+  assert.equal(logger.warnCalls[0][0], 'Invalid filter rule skipped');
+  assert.equal(logger.warnCalls[0][1].rule, '/(abc/');
+  assert.match(logger.warnCalls[0][1].error, /Invalid regular expression/);
+});
+
 test('`isValidBase64` 应识别合法与非法 Base64 字符串', () => {
   assert.equal(isValidBase64('dm1lc3M6Ly90ZXN0'), true);
   assert.equal(isValidBase64('YWJjZA=='), true);

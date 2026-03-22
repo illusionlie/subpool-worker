@@ -1,35 +1,76 @@
-export function applyFilter(content, filterConfig) {
+const FILTER_REGEX_LITERAL_PATTERN = /^\/(.*)\/([a-z]*)$/i;
+const REGEXP_ESCAPE_PATTERN = /[.*+?^${}()|[\]\\]/g;
+
+function escapeRegExpLiteral(value) {
+  return value.replace(REGEXP_ESCAPE_PATTERN, '\\$&');
+}
+
+function warnInvalidFilterRule(logger, rule, error) {
+  if (!logger || typeof logger.warn !== 'function') {
+    return;
+  }
+
+  logger.warn('Invalid filter rule skipped', {
+    rule,
+    error: error instanceof Error ? error.message : String(error)
+  });
+}
+
+function compileFilterRule(rule, logger) {
+  if (typeof rule !== 'string' || rule.length === 0) {
+    warnInvalidFilterRule(logger, rule, new Error('Rule must be a non-empty string'));
+    return null;
+  }
+
+  const literalMatch = rule.match(FILTER_REGEX_LITERAL_PATTERN);
+
+  if (literalMatch) {
+    const pattern = literalMatch[1];
+    const flags = literalMatch[2];
+
+    try {
+      const originalRegex = new RegExp(pattern, flags);
+      const encodedRegex = new RegExp(encodeURIComponent(pattern), flags);
+      return { original: originalRegex, encoded: encodedRegex };
+    } catch (error) {
+      warnInvalidFilterRule(logger, rule, error);
+      return null;
+    }
+  }
+
+  try {
+    const originalRegex = new RegExp(escapeRegExpLiteral(rule));
+    const encodedRegex = new RegExp(escapeRegExpLiteral(encodeURIComponent(rule)));
+    return { original: originalRegex, encoded: encodedRegex };
+  } catch (error) {
+    warnInvalidFilterRule(logger, rule, error);
+    return null;
+  }
+}
+
+export function applyFilter(content, filterConfig, logger = null) {
   if (!filterConfig || !filterConfig.enabled || !filterConfig.rules || filterConfig.rules.length === 0) {
     return content;
   }
 
-  // 将字符串规则转换为 RegExp 对象，同时创建URL编码版本
-  const regexRules = filterConfig.rules.map(rule => {
-    try {
-      const match = rule.match(new RegExp('^/(.*?)/([gimy]*)$'));
-      const pattern = match[1];
-      const flags = match[2];
+  // 将字符串规则转换为 RegExp 对象，同时创建 URL 编码版本
+  const regexRules = filterConfig.rules
+    .map(rule => compileFilterRule(rule, logger))
+    .filter(Boolean);
 
-      // 创建原始规则和URL编码规则
-      const originalRegex = new RegExp(pattern, flags);
-      const encodedRegex = new RegExp(encodeURIComponent(pattern), flags);
-
-      return { original: originalRegex, encoded: encodedRegex };
-      } catch (_err) {
-        // 兼容非 /.../i 格式的旧规则
-        const originalRegex = new RegExp(rule);
-        const encodedRegex = new RegExp(encodeURIComponent(rule));
-        return { original: originalRegex, encoded: encodedRegex };
-      }
-});
+  if (regexRules.length === 0) {
+    return content;
+  }
 
   return content.split('\n')
     .filter(line => {
       if (!line.trim()) return true;
       // 同时测试原始规则和编码规则
-      return !regexRules.some(ruleSet =>
-        ruleSet.original.test(line) || ruleSet.encoded.test(line)
-      );
+      return !regexRules.some(ruleSet => {
+        ruleSet.original.lastIndex = 0;
+        ruleSet.encoded.lastIndex = 0;
+        return ruleSet.original.test(line) || ruleSet.encoded.test(line);
+      });
     })
     .join('\n');
 }
