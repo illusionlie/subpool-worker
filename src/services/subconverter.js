@@ -132,8 +132,15 @@ export class SubconverterService {
         if (content.includes('proxies:') || (content.includes('outbounds') && content.includes('inbounds'))) {
           conversionUrls.push(url);
         } else if (isValidBase64(content)) {
-          const decoded = atob(content);
-          fetchedNodes.push(applyFilter(decoded, filterConfig));
+          const normalizedContent = this._normalizeBase64ForDecode(content);
+          try {
+            const decoded = atob(normalizedContent);
+            fetchedNodes.push(applyFilter(decoded, filterConfig));
+          } catch (error) {
+            logger.warn(`Failed to decode base64 content from ${url}`, {
+              error: error instanceof Error ? error.message : String(error)
+            });
+          }
         } else if (content.includes('://')) {
           fetchedNodes.push(applyFilter(content, filterConfig));
         } else {
@@ -146,6 +153,10 @@ export class SubconverterService {
     }
 
     return { fetchedNodes, conversionUrls };
+  }
+
+  static _normalizeBase64ForDecode(content) {
+    return content.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
   }
 
   static _getOutputFormat(url, userAgent) {
