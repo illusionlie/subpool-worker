@@ -1,7 +1,16 @@
 import { ConfigService } from './config.js';
 import { applyFilter, isValidBase64, safeBtoa } from '../utils.js';
 
+const SUBSCRIPTION_CACHE_POLICY = Object.freeze({
+  freshTtlMs: 60 * 1000,
+  swrTtlMs: 3 * 60 * 1000,
+  negativeTtlMs: 15 * 1000,
+  maxEntries: 512
+});
+
 export class SubconverterService {
+  static _resultCache = new Map();
+  static _inFlightRefreshes = new Map();
 
   /**
    * 主方法：生成最终的订阅内容
@@ -17,6 +26,26 @@ export class SubconverterService {
     // 确定最终输出格式
     const outputFormat = this._getOutputFormat(url, userAgent);
 
+    const cacheKey = this._createResultCacheKey(group, token, url, outputFormat);
+    const now = Date.now();
+    this._pruneExpiredCacheEntries(now);
+
+    const cacheState = this._getCacheState(cacheKey, now);
+    if (cacheState.state === 'fresh' && cacheState.entry) {
+      return this._clonePayload(cacheState.entry.payload);
+    }
+
+    const buildResult = () => this._buildSubscriptionResult(group, request, token, logger, outputFormat, url);
+
+    if (cacheState.state === 'stale' && cacheState.entry) {
+      this._refreshResultInBackground(cacheKey, buildResult, logger, cacheState.entry);
+      return this._clonePayload(cacheState.entry.payload);
+    }
+
+    return this._refreshResultBlocking(cacheKey, buildResult, logger);
+  }
+
+  static async _buildSubscriptionResult(group, request, token, logger, outputFormat, url) {
     // 分离内联节点和订阅链接
     const allSources = (group.nodes || '').split('\n').filter(Boolean);
     const inlineNodes = [];
@@ -36,7 +65,10 @@ export class SubconverterService {
     // 如果客户端请求的就是 base64，或者 sub-converter 正在回访我们，直接返回结果
     if (outputFormat === 'base64') {
       const headers = this._createSubscriptionHeaders();
-      return { content: safeBtoa(content), headers };
+      return {
+        payload: { content: safeBtoa(content), headers },
+        cacheStatus: 'positive'
+      };
     }
 
     // 创建一个指向自身的回调 URL，用于向 sub-converter 提供已处理好的节点
@@ -48,15 +80,21 @@ export class SubconverterService {
 
     // 如果没有任何可转换的内容，回退到返回空的 base64
     if (finalConversionUrls.length === 0) {
-        const headers = this._createSubscriptionHeaders();
-        return { content: safeBtoa(''), headers };
+      const headers = this._createSubscriptionHeaders();
+      return {
+        payload: { content: safeBtoa(''), headers },
+        cacheStatus: 'positive'
+      };
     }
 
     const subconverterConfig = ConfigService.get('subconverter');
     const subconverterUrl = this._generateSubConverterUrl(outputFormat, finalConversionUrls, subconverterConfig);
     if (!subconverterUrl || subconverterUrl.trim() === '') {
       const headers = this._createSubscriptionHeaders();
-      return { content: safeBtoa(''), headers };
+      return {
+        payload: { content: safeBtoa(''), headers },
+        cacheStatus: 'positive'
+      };
     }
 
     try {
@@ -65,18 +103,185 @@ export class SubconverterService {
 
       let subContent = await response.text();
       if (outputFormat === 'clash') {
-          subContent = this._fixClashWireguard(subContent);
+        subContent = this._fixClashWireguard(subContent);
       }
 
       const headers = this._createSubscriptionHeaders(true);
-      return { content: subContent, headers };
-
+      return {
+        payload: { content: subContent, headers },
+        cacheStatus: 'positive'
+      };
     } catch (error) {
       logger.error(error, { customMessage: 'Sub-converter fetch failed' });
       // 转换失败时，回退到返回原生 base64 节点
       const headers = this._createSubscriptionHeaders();
-      return { content: safeBtoa(content), headers };
+      return {
+        payload: { content: safeBtoa(content), headers },
+        cacheStatus: 'negative'
+      };
     }
+  }
+
+  static async _refreshResultBlocking(cacheKey, buildResult, logger) {
+    const refreshPromise = this._ensureRefreshPromise(cacheKey, buildResult, logger, {
+      preserveStaleOnNegative: false,
+      staleEntry: null
+    });
+    const payload = await refreshPromise;
+    return this._clonePayload(payload);
+  }
+
+  static _refreshResultInBackground(cacheKey, buildResult, logger, staleEntry) {
+    const refreshPromise = this._ensureRefreshPromise(cacheKey, buildResult, logger, {
+      preserveStaleOnNegative: true,
+      staleEntry
+    });
+
+    const ctx = ConfigService.getCtx();
+    if (ctx && typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil(refreshPromise.catch(() => {}));
+      return;
+    }
+
+    refreshPromise.catch(() => {});
+  }
+
+  static _ensureRefreshPromise(cacheKey, buildResult, logger, options) {
+    const inFlight = this._inFlightRefreshes.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const refreshPromise = (async () => {
+      const result = await buildResult();
+      const shouldPreserveStale = this._shouldPreserveStaleOnNegative(result, options);
+      if (!shouldPreserveStale) {
+        this._setCacheEntry(cacheKey, result.payload, result.cacheStatus);
+      }
+      return result.payload;
+    })();
+
+    const trackedPromise = refreshPromise
+      .catch(error => {
+        this._logCacheRefreshError(error, logger, cacheKey);
+        throw error;
+      })
+      .finally(() => {
+        this._inFlightRefreshes.delete(cacheKey);
+      });
+
+    this._inFlightRefreshes.set(cacheKey, trackedPromise);
+    return trackedPromise;
+  }
+
+  static _shouldPreserveStaleOnNegative(result, options) {
+    if (!options?.preserveStaleOnNegative) {
+      return false;
+    }
+
+    if (!result || result.cacheStatus !== 'negative') {
+      return false;
+    }
+
+    const staleEntry = options.staleEntry;
+    if (!staleEntry || staleEntry.status !== 'positive') {
+      return false;
+    }
+
+    return Date.now() <= staleEntry.staleUntil;
+  }
+
+  static _setCacheEntry(cacheKey, payload, cacheStatus) {
+    const now = Date.now();
+    const isNegative = cacheStatus === 'negative';
+    const freshUntil = now + (isNegative ? SUBSCRIPTION_CACHE_POLICY.negativeTtlMs : SUBSCRIPTION_CACHE_POLICY.freshTtlMs);
+    const staleUntil = now + (isNegative ? SUBSCRIPTION_CACHE_POLICY.negativeTtlMs : (SUBSCRIPTION_CACHE_POLICY.freshTtlMs + SUBSCRIPTION_CACHE_POLICY.swrTtlMs));
+
+    this._resultCache.set(cacheKey, {
+      payload: this._clonePayload(payload),
+      status: isNegative ? 'negative' : 'positive',
+      createdAt: now,
+      freshUntil,
+      staleUntil
+    });
+
+    this._enforceCacheSizeLimit();
+  }
+
+  static _getCacheState(cacheKey, now = Date.now()) {
+    const entry = this._resultCache.get(cacheKey);
+    if (!entry) {
+      return { state: 'miss', entry: null };
+    }
+
+    if (now <= entry.freshUntil) {
+      return { state: 'fresh', entry };
+    }
+
+    if (now <= entry.staleUntil) {
+      return { state: 'stale', entry };
+    }
+
+    this._resultCache.delete(cacheKey);
+    return { state: 'miss', entry: null };
+  }
+
+  static _createResultCacheKey(group, token, url, outputFormat) {
+    const host = (url.hostname || '').toLowerCase();
+    const groupFingerprint = this._hashString(JSON.stringify({
+      nodes: group?.nodes || '',
+      filter: group?.filter || null
+    }));
+
+    return `token:${token}|host:${host}|format:${outputFormat}|group:${groupFingerprint}`;
+  }
+
+  static _hashString(value) {
+    let hash = 5381;
+    for (let i = 0; i < value.length; i += 1) {
+      hash = (hash * 33) ^ value.charCodeAt(i);
+    }
+    return (hash >>> 0).toString(16);
+  }
+
+  static _clonePayload(payload) {
+    return {
+      content: payload.content,
+      headers: { ...(payload.headers || {}) }
+    };
+  }
+
+  static _pruneExpiredCacheEntries(now = Date.now()) {
+    for (const [cacheKey, entry] of this._resultCache.entries()) {
+      if (now > entry.staleUntil) {
+        this._resultCache.delete(cacheKey);
+      }
+    }
+  }
+
+  static _enforceCacheSizeLimit() {
+    while (this._resultCache.size > SUBSCRIPTION_CACHE_POLICY.maxEntries) {
+      const oldestKey = this._resultCache.keys().next().value;
+      if (!oldestKey) {
+        break;
+      }
+      this._resultCache.delete(oldestKey);
+    }
+  }
+
+  static _logCacheRefreshError(error, logger, cacheKey) {
+    if (logger && typeof logger.error === 'function') {
+      logger.error(error, { customMessage: 'Subscription cache refresh failed', cacheKey });
+    }
+  }
+
+  static __clearResultCacheForTests() {
+    this._resultCache.clear();
+    this._inFlightRefreshes.clear();
+  }
+
+  static __getCachePolicyForTests() {
+    return { ...SUBSCRIPTION_CACHE_POLICY };
   }
 
   static async _fetchRemoteSubscriptions(urls, request, filterConfig, logger) {
