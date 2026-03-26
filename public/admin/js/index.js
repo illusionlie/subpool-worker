@@ -103,9 +103,19 @@ const App = {
 
   api: {
     async request(endpoint, options = {}) {
+      const defaultHeaders = { 'Content-Type': 'application/json' };
+      const requestHeaders = {
+        ...defaultHeaders,
+        ...(options.headers || {})
+      };
+
+      if (options.body instanceof FormData) {
+        delete requestHeaders['Content-Type'];
+      }
+
       const response = await fetch(`/admin/api${endpoint}`, {
-        headers: { 'Content-Type': 'application/json' },
-        ...options
+        ...options,
+        headers: requestHeaders
       });
 
       if (response.status === 401) {
@@ -114,10 +124,35 @@ const App = {
       }
 
       if (!response.ok) {
-        throw new Error(`API Error: ${response.statusText}`);
+        let errorMessage = `API Error: ${response.statusText}`;
+
+        try {
+          const errorPayload = await response.json();
+          if (typeof errorPayload?.error === 'string' && errorPayload.error.trim()) {
+            errorMessage = errorPayload.error;
+          }
+        } catch (_err) {
+          // ignore parse errors
+        }
+
+        throw new Error(errorMessage);
       }
 
-      return response.json();
+      const contentLength = response.headers.get('Content-Length');
+      if (contentLength === '0') {
+        return null;
+      }
+
+      const responseText = await response.text();
+      if (!responseText) {
+        return null;
+      }
+
+      try {
+        return JSON.parse(responseText);
+      } catch (_err) {
+        return responseText;
+      }
     },
 
     getConfig() {
@@ -162,6 +197,17 @@ const App = {
     logout() {
       return this.request('/logout', {
         method: 'POST'
+      });
+    },
+
+    exportData() {
+      return this.request('/export');
+    },
+
+    importData(payload) {
+      return this.request('/import', {
+        method: 'POST',
+        body: JSON.stringify(payload)
       });
     }
   },
@@ -241,6 +287,12 @@ const App = {
         break;
       case 'save-settings':
         await this.saveSettings();
+        break;
+      case 'export-backup':
+        await this.exportBackup();
+        break;
+      case 'import-backup':
+        await this.importBackup();
         break;
       default:
         break;
@@ -387,6 +439,98 @@ const App = {
     } catch (error) {
       console.error(error);
       this.UI.showToast('保存失败', 'error');
+    }
+  },
+
+  downloadJsonFile(fileName, data) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+    const objectUrl = URL.createObjectURL(blob);
+
+    try {
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  },
+
+  buildDefaultBackupFileName() {
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    const datePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+    const timePart = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    return `subpool-backup-${datePart}-${timePart}.json`;
+  },
+
+  async exportBackup() {
+    try {
+      const exportData = await this.api.exportData();
+      const fileName = this.buildDefaultBackupFileName();
+      this.downloadJsonFile(fileName, exportData);
+      this.UI.showToast('导出成功，备份文件已下载。');
+    } catch (error) {
+      console.error(error);
+      this.UI.showToast(error.message || '导出失败', 'error');
+    }
+  },
+
+  parseJsonFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(String(reader.result || ''));
+          resolve(parsed);
+        } catch (_err) {
+          reject(new Error('JSON 文件解析失败，请检查文件格式。'));
+        }
+      };
+
+      reader.onerror = () => {
+        reject(new Error('读取文件失败。'));
+      };
+
+      reader.readAsText(file, 'utf-8');
+    });
+  },
+
+  async importBackup() {
+    const confirmed = await this.UI.confirm('导入会覆盖当前所有订阅组，并按备份内容更新配置。是否继续？');
+    if (!confirmed) {
+      return;
+    }
+
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'application/json,.json';
+
+    const selectedFile = await new Promise((resolve) => {
+      fileInput.addEventListener('change', () => {
+        resolve(fileInput.files?.[0] || null);
+      }, { once: true });
+      fileInput.click();
+    });
+
+    if (!selectedFile) {
+      return;
+    }
+
+    try {
+      const payload = await this.parseJsonFile(selectedFile);
+      await this.api.importData(payload);
+      await this.refreshData();
+      this.state.selectedGroupToken = null;
+      this.state.isNewGroup = false;
+      this.render();
+      this.UI.showToast('导入成功，数据已刷新。');
+    } catch (error) {
+      console.error(error);
+      this.UI.showToast(error.message || '导入失败', 'error');
     }
   },
 
@@ -635,6 +779,8 @@ const App = {
             </div>
           </div>
           <div class="actions actions-center settings-actions">
+            <button class="btn btn-secondary" data-action="export-backup">导出备份</button>
+            <button class="btn btn-secondary" data-action="import-backup">导入备份</button>
             <button class="btn btn-primary" data-action="save-settings">保存设置</button>
           </div>
         </form>

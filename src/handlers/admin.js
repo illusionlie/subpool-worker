@@ -16,6 +16,7 @@ const PASSWORD_SALT_BYTE_LENGTH = 16;
 const PASSWORD_HASH_ITERATIONS = 210000;
 const PASSWORD_HASH_BIT_LENGTH = 256;
 const textEncoder = new TextEncoder();
+const ADMIN_DATA_SCHEMA_VERSION = 1;
 
 function parseAdminPasswordHashIterations(value) {
   if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
@@ -350,6 +351,190 @@ async function readJsonBody(request) {
   }
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function sanitizeConfigForResponse(config) {
+  const safeConfig = { ...(config || {}) };
+  delete safeConfig.adminPassword;
+  delete safeConfig.adminPasswordHash;
+  delete safeConfig.adminPasswordSalt;
+  delete safeConfig.adminPasswordHashIterations;
+  delete safeConfig.jwtSecret;
+  return safeConfig;
+}
+
+function sanitizeConfigForImport(config) {
+  const sanitizedConfig = { ...(config || {}) };
+  delete sanitizedConfig.adminPassword;
+  delete sanitizedConfig.adminPasswordHash;
+  delete sanitizedConfig.adminPasswordSalt;
+  delete sanitizedConfig.adminPasswordHashIterations;
+  delete sanitizedConfig.jwtSecret;
+  return sanitizedConfig;
+}
+
+function normalizeGroupFilterForImport(filter, groupIndex) {
+  if (filter === undefined) {
+    return {
+      enabled: false,
+      rules: []
+    };
+  }
+
+  if (!isPlainObject(filter)) {
+    throw new Error(`Invalid filter for group at index ${groupIndex}.`);
+  }
+
+  const rawRules = filter.rules;
+  if (rawRules !== undefined && !Array.isArray(rawRules)) {
+    throw new Error(`Invalid filter rules for group at index ${groupIndex}.`);
+  }
+
+  const normalizedRules = (rawRules || []).map((rule, ruleIndex) => {
+    if (typeof rule !== 'string') {
+      throw new Error(`Invalid filter rule at group index ${groupIndex}, rule index ${ruleIndex}.`);
+    }
+
+    return rule;
+  });
+
+  return deepMerge({}, filter, {
+    enabled: Boolean(filter.enabled),
+    rules: normalizedRules
+  });
+}
+
+function normalizeGroupForImport(rawGroup, groupIndex) {
+  if (!isPlainObject(rawGroup)) {
+    throw new Error(`Invalid group at index ${groupIndex}.`);
+  }
+
+  const name = typeof rawGroup.name === 'string' ? rawGroup.name.trim() : '';
+  const token = typeof rawGroup.token === 'string' ? rawGroup.token.trim() : '';
+
+  if (!name) {
+    throw new Error(`Group name is required at index ${groupIndex}.`);
+  }
+
+  if (!token || token.length > 128 || token.includes('/')) {
+    throw new Error(`Invalid token for group at index ${groupIndex}.`);
+  }
+
+  const nodes = typeof rawGroup.nodes === 'string' ? rawGroup.nodes : '';
+
+  return deepMerge({}, rawGroup, {
+    name,
+    token,
+    nodes,
+    allowChinaAccess: Boolean(rawGroup.allowChinaAccess),
+    filter: normalizeGroupFilterForImport(rawGroup.filter, groupIndex)
+  });
+}
+
+function normalizeImportPayload(payload) {
+  if (!isPlainObject(payload)) {
+    throw new Error('Invalid import payload. Expected a JSON object.');
+  }
+
+  const schemaVersion = payload.schemaVersion;
+  if (schemaVersion !== undefined && schemaVersion !== ADMIN_DATA_SCHEMA_VERSION) {
+    throw new Error(`Unsupported schema version: ${schemaVersion}.`);
+  }
+
+  if (!isPlainObject(payload.config)) {
+    throw new Error('Invalid import payload. "config" must be an object.');
+  }
+
+  if (!Array.isArray(payload.groups)) {
+    throw new Error('Invalid import payload. "groups" must be an array.');
+  }
+
+  const normalizedGroups = payload.groups.map((group, index) => normalizeGroupForImport(group, index));
+  const tokenSet = new Set();
+
+  for (const group of normalizedGroups) {
+    if (tokenSet.has(group.token)) {
+      throw new Error(`Duplicated group token: ${group.token}.`);
+    }
+
+    tokenSet.add(group.token);
+  }
+
+  return {
+    importedConfig: sanitizeConfigForImport(payload.config),
+    importedGroups: normalizedGroups
+  };
+}
+
+async function buildMergedConfigForImport(importedConfig) {
+  const currentConfig = await KVService.getGlobalConfig() || {};
+  const mergedConfig = normalizePersistedAdminCredentialFields(
+    deepMerge({}, currentConfig, importedConfig)
+  );
+
+  if (hasConfiguredAdminPassword(mergedConfig) && !hasConfiguredJwtSecret(mergedConfig)) {
+    mergedConfig.jwtSecret = generateJwtSecret();
+  }
+
+  return mergedConfig;
+}
+
+async function syncImportedGroups(importedGroups, logger) {
+  const existingGroups = await KVService.getAllGroups();
+  const existingGroupMap = new Map();
+
+  for (const group of existingGroups) {
+    if (!group || typeof group.token !== 'string') {
+      continue;
+    }
+
+    const normalizedToken = group.token.trim();
+    if (!normalizedToken) {
+      continue;
+    }
+
+    existingGroupMap.set(normalizedToken, group);
+  }
+
+  const existingTokens = new Set(existingGroupMap.keys());
+  const importedTokens = new Set(importedGroups.map(group => group.token));
+  const importedOnlyTokens = [...importedTokens].filter(token => !existingTokens.has(token));
+
+  const rollbackGroups = async () => {
+    for (const group of existingGroupMap.values()) {
+      await KVService.saveGroup(group);
+    }
+
+    for (const token of importedOnlyTokens) {
+      await KVService.deleteGroup(token);
+    }
+  };
+
+  try {
+    for (const group of importedGroups) {
+      await KVService.saveGroup(group);
+    }
+
+    for (const token of existingTokens) {
+      if (!importedTokens.has(token)) {
+        await KVService.deleteGroup(token);
+      }
+    }
+  } catch (err) {
+    try {
+      await rollbackGroups();
+    } catch (rollbackErr) {
+      if (logger && typeof logger.error === 'function') {
+        logger.error(rollbackErr, { customMessage: 'Failed to rollback groups after import synchronization error.' });
+      }
+    }
+
+    throw err;
+  }
+}
+
 function getLoginRequestIp(request) {
   if (!request || !request.headers) {
     return 'unknown';
@@ -578,13 +763,71 @@ async function handleApiRequest(request, url, logger) {
   // 获取配置
   router.get('/admin/api/config', async () => {
     const config = await KVService.getGlobalConfig() || ConfigService.get();
-    const safeConfig = { ...config };
-    delete safeConfig.adminPassword;
-    delete safeConfig.adminPasswordHash;
-    delete safeConfig.adminPasswordSalt;
-    delete safeConfig.adminPasswordHashIterations;
-    delete safeConfig.jwtSecret;
-    return response.json(safeConfig);
+    return response.json(sanitizeConfigForResponse(config));
+  });
+
+  // 导出配置与订阅组
+  router.get('/admin/api/export', async () => {
+    const config = await KVService.getGlobalConfig() || ConfigService.get();
+    const groups = await KVService.getAllGroups();
+
+    return response.json({
+      schemaVersion: ADMIN_DATA_SCHEMA_VERSION,
+      exportedAt: new Date().toISOString(),
+      config: sanitizeConfigForResponse(config),
+      groups
+    });
+  });
+
+  // 导入配置与订阅组
+  router.post('/admin/api/import', async () => {
+    const payload = await readJsonBody(request);
+    if (!payload) {
+      return response.json({ error: 'Invalid JSON payload.' }, 400);
+    }
+
+    let normalizedPayload;
+    try {
+      normalizedPayload = normalizeImportPayload(payload);
+    } catch (err) {
+      return response.json({
+        error: err instanceof Error ? err.message : 'Invalid import payload.'
+      }, 400);
+    }
+
+    let previousConfig = null;
+    let configPersisted = false;
+
+    try {
+      previousConfig = await KVService.getGlobalConfig() || {};
+      const mergedConfig = await buildMergedConfigForImport(normalizedPayload.importedConfig);
+      await KVService.saveGlobalConfig(mergedConfig);
+      configPersisted = true;
+
+      await syncImportedGroups(normalizedPayload.importedGroups, logger);
+      await ConfigService.init(ConfigService.getEnv(), ConfigService.getCtx());
+
+      logger.warn('Admin config/groups imported from JSON backup.', {
+        importedGroups: normalizedPayload.importedGroups.length
+      }, { notify: true });
+
+      return response.json({
+        success: true,
+        importedGroups: normalizedPayload.importedGroups.length
+      });
+    } catch (err) {
+      if (configPersisted) {
+        try {
+          await KVService.saveGlobalConfig(previousConfig);
+          await ConfigService.init(ConfigService.getEnv(), ConfigService.getCtx());
+        } catch (rollbackErr) {
+          logger.error(rollbackErr, { customMessage: 'Failed to rollback global config after import error.' });
+        }
+      }
+
+      logger.error(err, { customMessage: 'Failed to import admin config/groups from JSON.' });
+      return response.json({ error: 'Failed to import data.' }, 500);
+    }
   });
 
   // 保存配置
