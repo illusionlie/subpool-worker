@@ -1,231 +1,340 @@
 # Sub Pool Worker
 
-一个基于 Cloudflare Workers 的轻量级订阅池服务，用于管理和分发代理订阅链接。
+一个基于 Cloudflare Workers 的轻量订阅池服务，目标是：
 
-## 功能特点
+- 统一管理多组订阅来源
+- 按客户端格式分发订阅
+- 通过 Web 管理后台完成配置、导入导出与运维
 
-- 🔄 订阅聚合：将多个订阅链接/节点合并为一个，按组管理
-- 🌐 格式转换：可配置远端 subconverter 进行订阅格式转换
-- 🔐 管理后台：提供基于 Web 的管理界面
-- 🚫 失败封禁: 防暴力破解的登录失败封禁机制
-- 📱 Telegram 通知：可选的关键操作通过 Telegram 机器人通知
-- 🛡️ 访问控制：支持阻止特定地区访问和简单的机器人防护
-- 📝 日志记录: 完整的访问日志和错误记录
-- 🗃️ KV 存储：使用 Cloudflare KV 进行配置和数据存储
+> 当前实现是 **Worker + KV + Worker Assets** 架构，静态页面由 `public/` 提供，业务逻辑在 `src/`。
+
+---
+
+## 核心能力
+
+- **订阅组管理**：按组维护名称、Token、来源节点、过滤规则与地区访问策略
+- **订阅聚合与过滤**：支持内联节点 + 远程订阅混合输入，过滤器支持正则与普通字符串
+- **格式转换**：按 URL 参数 / User-Agent 自动识别目标格式并接入 subconverter
+- **失败回退**：subconverter 异常时回退为 base64 原始节点，而不是直接返回 5xx
+- **管理后台**：首次初始化、登录鉴权、会话续期、配置管理、订阅组 CRUD
+- **登录失败防护**：基于 IP 的失败计数与临时封禁
+- **数据备份**：支持配置与订阅组 JSON 导入/导出（带回滚保护）
+- **访问防护**：可按组限制中国大陆访问，可全局启用基础 bot 检测拦截
+- **日志与通知**：结构化日志 + Telegram 通知；支持 `X-Debug-Log` 临时提升日志输出
+
+---
+
+## 路由总览
+
+| 路径 | 说明 |
+| --- | --- |
+| `GET /sub/:token` | 订阅入口。支持按参数/UA 选择输出格式 |
+| `ALL /admin`、`ALL /admin/*` | 管理后台页面与 API |
+| `ALL /favicon.ico` | 固定返回 404 |
+| `ALL /robots.txt` | 返回禁止抓取策略 |
+| 其他路径 | 回退到 `public/index.html` |
+
+参考实现：
+
+- 路由入口：[`src/router.js`](src/router.js)
+- Worker 入口：[`src/index.js`](src/index.js)
+
+---
 
 ## 项目结构
 
 ```text
-public/                 # Worker Assets 静态页面资源
-├── admin/
-│   ├── index.html      # 管理后台页面
-│   └── login.html      # 登录页面
-└── index.html          # 默认欢迎页
+.github/
+└── workflows/
+    └── generate-test.yml            # CI：lint + test + deploy dry-run 校验
+
+public/
+├── index.html                       # 默认回退页（未知路径 / 订阅异常回退）
+└── admin/
+    ├── index.html                   # 管理后台主页面
+    ├── init.html                    # 首次初始化页面
+    ├── login.html                   # 登录页
+    └── js/
+        └── index.js                 # 管理后台前端逻辑（非 ESM script）
 
 src/
-├── handlers/           # 请求处理器
-│   ├── admin.js        # 管理后台处理
-│   └── subscription.js # 订阅请求处理
-├── services/           # 核心服务
-│   ├── auth.js         # JWT 认证服务
-│   ├── config.js       # 配置管理服务
-│   ├── kv.js           # KV 存储服务
-│   ├── logger.js       # 日志服务
-│   ├── subconverter.js # 订阅转换服务
-│   └── telegram.js     # Telegram 通知服务
-├── index.js            # 入口文件
-├── router.js           # 路由配置
-└── utils.js            # 工具函数
+├── index.js                         # Worker fetch 入口
+├── router.js                        # 总路由
+├── utils.js                         # 过滤、bot 检测、响应头封装、静态资源封装
+├── handlers/
+│   ├── admin.js                     # 管理模块导出 + 测试白盒导出
+│   ├── subscription.js              # /sub/:token 处理
+│   └── admin/
+│       ├── entry-controller.js      # 管理入口：初始化状态、登录态、页面/API分流
+│       ├── page-controller.js       # 管理页静态资源分发
+│       ├── public-controller.js     # 无需登录 API：init status/init/login
+│       └── protected-api-controller.js # 需登录 API：config/groups/import/export/logout
+├── services/
+│   ├── auth.js                      # JWT 与 Cookie
+│   ├── config.js                    # 全局配置加载 + deepMerge
+│   ├── kv.js                        # KV 访问与 groups:index 维护
+│   ├── logger.js                    # 结构化日志 + 通知触发
+│   ├── subconverter.js              # 订阅抓取、识别、转换与回退
+│   ├── telegram.js                  # Telegram 消息发送
+│   └── admin/
+│       ├── credential-service.js    # 密码哈希/校验/迁移
+│       ├── session-service.js       # JWT secret 管理
+│       └── import-export-service.js # 后台导入导出规范化与回滚
+├── repositories/
+│   └── admin/
+│       ├── config-repository.js
+│       ├── group-repository.js
+│       ├── init-lock-repository.js
+│       └── login-attempt-repository.js
+
+test/
+├── admin-api-flow.test.js
+├── admin-auth.test.js
+├── subconverter.test.js
+├── subscription-regression.test.js
+└── utils.test.js
+
+wrangler.toml.example                # Wrangler 模板
+package.json
+README.md
 ```
 
-## 快速开始
+---
 
-### 环境准备
+## 运行环境
 
-- Node.js 18+
-- Cloudflare 账户
-- Wrangler CLI
+- Node.js 18+（建议与 CI 对齐使用 Node.js 22）
+- Cloudflare 账号
+- Wrangler CLI（项目使用 v4）
+- 一个 Workers KV 命名空间
 
-### 命令行部署到 Cloudflare
+---
 
-1. 克隆本项目：
+## 快速开始（手动部署）
 
-   ```bash
-   git clone https://github.com/illusionlie/subpool-worker.git
-   cd sub-pool
-   ```
+### 1) 安装依赖
 
-2. 安装依赖：
+```bash
+npm ci
+```
 
-   ```bash
-   npm install
-   ```
+### 2) 创建 KV 命名空间
 
-3. 创建 KV 命名空间：
+```bash
+wrangler kv namespace create "KV"
+```
 
-   ```bash
-   wrangler kv namespace create "KV"
-   ```
+### 3) 配置 `wrangler.toml`
 
-4. 配置 Cloudflare：
-   - 复制 [wrangler.toml.example](wrangler.toml.example) 到 `wrangler.toml`
-   - `wrangler.toml.example` 已启用 Worker Assets，会自动上传 `public/` 目录中的静态页面资源
-   - 修改配置文件中的占位符：
-     - `__WORKER_NAME__`：你的 Worker 名称
-     - `__KV_NAMESPACE_ID__`：你的 KV 命名空间 ID
-     - `__DEBUG_SECRET__`：调试密钥（随机字符串）
-     - `__INIT_SECRET__`：初始化密钥（高强度随机字符串，仅首次初始化管理员密码时使用）
+复制 [`wrangler.toml.example`](wrangler.toml.example) 为 `wrangler.toml`，并替换占位符：
 
-5. 部署到 Cloudflare：
+- `__WORKER_NAME__`：Worker 名称
+- `__KV_NAMESPACE_ID__`：KV 命名空间 ID
+- `__DEBUG_SECRET__`：调试日志密钥
+- `__INIT_SECRET__`：后台初始化密钥（仅初始化管理员密码时使用）
 
-   ```bash
-   npm run deploy
-   ```
+说明：
 
-### 通过 Github Actions 部署到 Cloudflare
+- 已启用 `[assets]` 并绑定 `ASSETS`
+- `run_worker_first = true`，确保先经过 Worker 统一鉴权与安全响应头
 
-1. 复刻本项目到你的 Github 账户
+### 4) 部署
 
-2. 在你的 Cloudflare 账户中创建：
-   - 一个 Workers KV，命名随意
-   - 帐户 API 令牌（只需要 Workers KV 存储和 Workers 脚本 的编辑权限）
+```bash
+npm run deploy
+```
 
->
-> 保管妥当你的 KV ID和 API 令牌，不要将其分享给任何人或暴露在公开环境！
->
+`npm run deploy` 的执行顺序是：
 
-3. 在复刻的 Github 项目中创建（设置->机密和变量->操作->仓库机密）：
+1. `npm run check`
+2. `npm run build`（`wrangler deploy --dry-run`）
+3. `wrangler deploy`
 
- *    **`WORKER_NAME`**
-       *   **值**: 部署后的 Worker 名称
+---
 
- *    **`CF_API_TOKEN`**
-      *   **值**: Cloudflare API 令牌
-
- *    **`CF_KV_NAMESPACE_ID`**
-      *   **值**: Workers KV ID
-
- *    **`DEBUG_SECRET`**
-      *   **值**: 用于覆写日志等级的密钥
-
- *    **`INIT_SECRET`**
-        *   **值**: 初始化密钥（高强度随机字符串）
-
- *    **`CUSTOM_DOMAIN`**
-       *   **值**: 自定义域（可选）
-
-### 本地检查
-
-- 运行 [`npm run lint`](package.json:8) 执行 ESLint 静态检查
-- 运行 [`npm test`](package.json:9) 执行 Node 内置测试
-- 运行 [`npm run check`](package.json:10) 串行执行 lint 与测试
-- 运行 [`npm run build`](package.json:11) 执行 Cloudflare Workers dry-run 构建校验
+## 本地开发与检查
 
 ### 本地开发
 
-1. 启动开发服务器：
+```bash
+npm run dev
+```
 
-   ```bash
-   npm run dev
-   ```
+默认访问：`http://localhost:8787`
 
-2. 访问 `http://localhost:8787` 查看应用
+### 常用质量命令
 
-### 前端资源位置
+| 命令 | 作用 |
+| --- | --- |
+| `npm run lint` | ESLint 检查 |
+| `npm test` | Node 内置测试 |
+| `npm run check` | 串行执行 lint + test |
+| `npm run build` | Cloudflare deploy dry-run 校验 |
 
-- `public/admin/index.html`：管理后台主页面
-- `public/admin/login.html`：登录页
-- `public/admin/init.html`：首次初始化页（设置初始管理员密码）
-- `public/index.html`：默认欢迎页 / 拦截回退页
-- Worker 通过 `wrangler.toml` 中的 `[assets]` 配置加载这些静态资源，并在代码中统一补充鉴权与安全响应头
+注意：`npm run build` 依赖本地存在 `wrangler.toml`，否则会失败。
 
-## 使用说明
+### 单测细粒度运行
 
-### 管理后台使用
+```bash
+node --test test/admin-auth.test.js
+node --test test/admin-auth.test.js --test-name-pattern "<case-name>"
+```
 
-1. 访问 `/admin` 路径进入管理后台。首次访问会进入初始化页面，请先设置管理员密码。
+---
 
->
-> **初始化完成后请妥善保管密码；如遗忘需通过 KV 手动重置。**
-> **初始化页面需要输入 `INIT_SECRET`（部署密钥），请与管理员密码分离保管。**
->
+## CI 说明（当前仓库行为）
 
-2. 输入部署时配置的 `INIT_SECRET` 与你设置的管理员密码完成初始化（系统会自动生成 JWT 密钥）
+工作流 [`.github/workflows/generate-test.yml`](.github/workflows/generate-test.yml) 当前做的是：
 
-3. 使用你设置的管理员密码登录
+1. `npx eslint . --max-warnings 0`
+2. `npm test`
+3. 基于 [`wrangler.toml.example`](wrangler.toml.example) 生成临时 `wrangler.toml`
+4. 执行 `npm run build` 做 deploy dry-run 校验
 
-4. 管理后台主要能力：
-   - 订阅组管理：名称、Token、是否允许中国大陆访问、订阅来源（逐行：可为 URL 或内联节点）
-   - 过滤器：启用后可填写多条规则；支持两种写法：
-     - 正则：/pattern/flags（如：/过期/i）
-     - 简单字符串：会自动转换为正则并同时匹配 URL 编码形式
-   - 全局设置：登录失败防护、修改密码、Telegram 通知、Subconverter 后端与配置地址
+> 当前 CI **不是自动正式部署**，而是“可部署性检查”。
 
-### Telegram 通知配置
+---
 
-1. 创建 Telegram 机器人并获取 Bot Token
-2. 获取聊天 ID (Chat ID)
-3. 在管理后台配置 Telegram 设置
-4. 启用通知功能
+## 管理后台流程（初始化 / 登录）
 
-### 订阅接口
+### 初始化阶段
 
-- 路径：`GET /sub/:token`
-- 客户端格式选择（任一参数存在即生效）：
-  - `?clash` → Clash
-  - `?sb` 或 `?singbox` → Sing-box
-  - `?surge` → Surge
-  - `?quanx` → Quantumult X
-  - `?loon` → Loon
-  - `?b64` 或 `?base64` → Base64（直接返回 Base64 原始节点）
-- 响应头（示例）：
-  - `Profile-Update-Interval: <分钟>`
-  - `Subscription-Userinfo: upload=0; download=0; total=<字节>; expire=<UNIX时间>`
-  - 若为转换产物（如 Clash/Sing-box），会附带 `Content-Disposition` 以便客户端保存为配置文件
-- 区域限制与反爬：
-  - 每个订阅组可单独设置“允许中国大陆 IP 访问”
-  - 若启用全局“阻止爬虫”，将基于 UA、HTTP/TLS/请求头多维打分阻断访问
+- 未初始化时，仅开放：
+  - `GET /admin/api/init/status`
+  - `POST /admin/api/init`
+  - `POST /admin/api/login`
+- 访问 `/admin` 会引导到初始化页 `public/admin/init.html`
+- `POST /admin/api/init` 需要提供 `INIT_SECRET`（Header `X-Init-Secret` 或 JSON 字段）
+- 初始化成功后：
+  - 生成并保存密码哈希（PBKDF2）
+  - 生成 JWT secret
+  - 下发登录 Cookie
 
-### Subconverter 对接说明
+### 登录与会话
 
-- 工作流程：
-  1) 将订阅来源分为“内联节点”和“远程订阅 URL”；并发拉取远程内容
-  2) 自动识别 YAML/JSON 配置类内容，或 Base64/原生节点，并进行过滤与去重
-  3) 目标为 Clash/Sing-box 时：拼装回调 URL + 远程配置 URL 列表，转交 Subconverter 转换
-  4) 转换失败时降级返回 Base64 原始节点
-- 配置项（管理后台 → 全局设置）：
-  - Subconverter 后端地址（不含协议）与协议（https/http）
-  - Subconverter 配置文件 URL
-  
+- 登录 API：`POST /admin/api/login`
+- 登录成功后通过 HttpOnly Cookie 维护会话
+- 已登录访问后台时会自动续签 JWT
+- 未登录访问受保护 API 返回 401，页面访问将跳转到登录页
+
+参考实现：
+
+- 入口控制：[`src/handlers/admin/entry-controller.js`](src/handlers/admin/entry-controller.js)
+- 公共 API：[`src/handlers/admin/public-controller.js`](src/handlers/admin/public-controller.js)
+- 受保护 API：[`src/handlers/admin/protected-api-controller.js`](src/handlers/admin/protected-api-controller.js)
+
+---
+
+## 订阅处理与转换逻辑
+
+订阅主入口：[`src/handlers/subscription.js`](src/handlers/subscription.js)
+
+### 输出格式选择
+
+支持以下参数（存在即生效）：
+
+- `?clash`
+- `?sb` 或 `?singbox`
+- `?surge`
+- `?quanx`
+- `?loon`
+- `?b64` 或 `?base64`
+
+若都未命中，默认输出 base64。
+
+### 转换链路
+
+[`src/services/subconverter.js`](src/services/subconverter.js) 的核心流程：
+
+1. 拆分来源：内联节点 + 远程订阅 URL
+2. 并发抓取远程订阅（总超时 4 秒）
+3. 禁止抓取与当前请求同域 URL（递归保护）
+4. 识别 YAML/JSON 配置、Base64、原生节点并归并
+5. 应用过滤规则并去重
+6. 目标为非 base64 时，将 `https://<host>/sub/<token>?format=base64` 插入转换 URL 列表首位
+7. 调用 subconverter 转换
+8. 转换失败回退为 base64 原始节点
+
+### 访问控制
+
+- 每个订阅组可配置是否允许中国大陆访问
+- 全局可开启 bot 拦截（UA + 请求特征评分）
+
+---
+
+## 管理后台 API 一览
+
+| 方法 | 路径 | 鉴权 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/admin/api/init/status` | 否 | 查询是否初始化 / INIT_SECRET 是否可用 |
+| POST | `/admin/api/init` | 否 | 执行首次初始化 |
+| POST | `/admin/api/login` | 否 | 登录 |
+| POST | `/admin/api/logout` | 是 | 登出 |
+| GET | `/admin/api/config` | 是 | 获取配置（已脱敏） |
+| PUT | `/admin/api/config` | 是 | 更新配置（支持改密） |
+| GET | `/admin/api/groups` | 是 | 获取订阅组列表 |
+| POST | `/admin/api/groups` | 是 | 创建订阅组 |
+| PUT | `/admin/api/groups/:token` | 是 | 更新订阅组 |
+| DELETE | `/admin/api/groups/:token` | 是 | 删除订阅组 |
+| GET | `/admin/api/utils/gentoken` | 是 | 生成随机 token |
+| GET | `/admin/api/export` | 是 | 导出配置+订阅组 |
+| POST | `/admin/api/import` | 是 | 导入配置+订阅组（失败回滚） |
+
+---
+
+## KV 数据键说明
+
+| 键 | 说明 |
+| --- | --- |
+| `config:global` | 全局配置 |
+| `groups:index` | 订阅组 token 索引 |
+| `group:<token>` | 订阅组详情 |
+| `failedAttempts::<ip>` | 登录失败计数 |
+| `banned::<ip>` | 登录封禁状态 |
+| `admin:init:lock` | 初始化互斥锁 |
+
+---
+
+## 关键配置项（全局）
+
+来自 [`src/services/config.js`](src/services/config.js) 默认配置：
+
+- `blockBots`：是否拦截 bot
+- `fileName`：转换产物下载文件名
+- `subUpdateTime`：`Profile-Update-Interval`
+- `subscriptionInfo.totalTB / expireDate`：`Subscription-Userinfo`
+- `telegram.enabled / botToken / chatId`
+- `subconverter.url / protocol / configUrl`
+- `failedBan.enabled / maxAttempts / banDuration / failedAttemptsTtl`
+
+---
+
+## 开发注意事项（避免踩坑）
+
+- 任意 KV 读写前必须先初始化配置：`ConfigService.init(env, ctx)`
+- 更新全局配置必须做深合并：`deepMerge({}, oldConfig, patch)`，不能整对象覆盖
+- 订阅组请走 `KVService.saveGroup/deleteGroup`，不要直接改 `group:<token>`
+- 常规响应、JSON、静态资源建议使用统一响应封装（带安全头）
+- `public/**/*.js` 是 script 语义；`src/**/*.js` 是 ESM + Worker 运行时语义
+
+---
+
 ## 技术栈
 
-- [Cloudflare Workers](https://workers.cloudflare.com/): Serverless 执行环境
-- [Cloudflare Worker Assets](https://developers.cloudflare.com/workers/static-assets/): 静态页面托管与缓存
-- [Cloudflare KV](https://developers.cloudflare.com/workers/learning/how-kv-works/): 全球分布式键值存储
-- [itty-router](https://github.com/kwhitley/itty-router): 轻量级 Worker 路由器
-- [GitHub Actions](https://github.com/features/actions): CI/CD 自动化部署
-- JavaScript (ES Module)
-- HTML/CSS/原生 JavaScript (管理界面)
+- Cloudflare Workers
+- Cloudflare Worker Assets
+- Cloudflare KV
+- itty-router
+- Node.js 内置测试框架（`node:test`）
+- GitHub Actions（质量检查 + dry-run 校验）
+
+---
 
 ## 许可证
 
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
+MIT，见 [`LICENSE`](LICENSE)。
 
-## 安全特性
-
-- JWT Token 认证
-- 登录失败次数限制
-- IP 封禁机制
-- 防止中国地区访问（可配置）
-- 机器人访问检测
-
-## 作者
-
-Copyright (c) 2025 IllusionLie
-
-## 贡献
-
-欢迎提交 Issue 和 Pull Request 来改进这个项目。
+---
 
 ## 致谢
 
