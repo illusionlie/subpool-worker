@@ -407,6 +407,100 @@ test('后台 API 流程：初始化 -> 登录 -> 配置保存 -> 组 CRUD', asyn
   assert.equal(await kv.get(`group:${groupToken}`, 'json'), null);
 });
 
+test('后台 API 流程：创建/更新订阅组应拒绝订阅端不可访问的非法 token', async () => {
+  const logger = createLogger();
+  const ctx = createCtx();
+  const { env, kv } = createEnv();
+
+  let authCookie = await initializeAdminSession({
+    env,
+    logger,
+    ctx,
+    password: 'GroupTokenGuardPass123'
+  });
+
+  const invalidCreateResponse = await dispatchRequest('/admin/api/groups', {
+    env,
+    logger,
+    ctx,
+    method: 'POST',
+    headers: {
+      Cookie: authCookie
+    },
+    body: {
+      name: 'Invalid Token Group',
+      token: 'invalid/token',
+      allowChinaAccess: true,
+      nodes: 'vmess://invalid',
+      filter: {
+        enabled: false,
+        rules: []
+      }
+    }
+  });
+
+  assert.equal(invalidCreateResponse.status, 400);
+  assert.equal((await invalidCreateResponse.json()).error, 'Invalid group data');
+  authCookie = extractCookie(invalidCreateResponse);
+
+  assert.equal(await kv.get('groups:index', 'json'), null);
+
+  const validToken = 'valid-group-token';
+  const createValidResponse = await dispatchRequest('/admin/api/groups', {
+    env,
+    logger,
+    ctx,
+    method: 'POST',
+    headers: {
+      Cookie: authCookie
+    },
+    body: {
+      name: 'Valid Token Group',
+      token: validToken,
+      allowChinaAccess: false,
+      nodes: 'vmess://valid',
+      filter: {
+        enabled: false,
+        rules: []
+      }
+    }
+  });
+
+  assert.equal(createValidResponse.status, 200);
+  authCookie = extractCookie(createValidResponse);
+
+  const overLengthToken = 'a'.repeat(129);
+  const invalidUpdateResponse = await dispatchRequest(`/admin/api/groups/${overLengthToken}`, {
+    env,
+    logger,
+    ctx,
+    method: 'PUT',
+    headers: {
+      Cookie: authCookie
+    },
+    body: {
+      name: 'Should Not Persist',
+      allowChinaAccess: true,
+      nodes: 'vmess://changed',
+      filter: {
+        enabled: true,
+        rules: ['drop-me']
+      }
+    }
+  });
+
+  assert.equal(invalidUpdateResponse.status, 400);
+  assert.equal((await invalidUpdateResponse.json()).error, 'Invalid group data');
+
+  const storedValidGroup = await kv.get(`group:${validToken}`, 'json');
+  assert.ok(storedValidGroup);
+  assert.equal(storedValidGroup.name, 'Valid Token Group');
+  assert.equal(storedValidGroup.nodes, 'vmess://valid');
+
+  assert.equal(await kv.get(`group:${overLengthToken}`, 'json'), null);
+  assert.deepEqual(await kv.get('groups:index', 'json'), [validToken]);
+});
+
 test('后台 API 流程：达到失败阈值当次应返回 429 并写入封禁状态', async () => {
   const logger = createLogger();
   const ctx = createCtx();

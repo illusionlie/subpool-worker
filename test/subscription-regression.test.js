@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { handleRequest } from '../src/router.js';
+import { GROUP_TOKEN_MAX_LENGTH } from '../src/services/group-token.js';
 
 class InMemoryKV {
   constructor() {
@@ -248,6 +249,31 @@ test('订阅链路回归：subconverter 失败时应回退为 base64 原始节�
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('订阅链路回归：超长 token 应返回 400', async () => {
+  const { env } = createEnv({
+    globalConfig: {
+      blockBots: false
+    },
+    groups: []
+  });
+
+  const logger = createLogger();
+  const ctx = createCtx();
+
+  const overLengthToken = 'a'.repeat(GROUP_TOKEN_MAX_LENGTH + 1);
+  const invalidLengthResponse = await dispatchRequest(`/sub/${overLengthToken}`, {
+    env,
+    logger,
+    ctx,
+    headers: {
+      'User-Agent': 'Mozilla/5.0'
+    }
+  });
+
+  assert.equal(invalidLengthResponse.status, 400);
+  assert.equal(await invalidLengthResponse.text(), 'Invalid token format.');
 });
 
 test('订阅链路回归：同域远程订阅应触发递归保护且不发起网络抓取', async () => {

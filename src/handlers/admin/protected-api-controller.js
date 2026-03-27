@@ -1,4 +1,5 @@
 import { ConfigService, deepMerge } from '../../services/config.js';
+import { normalizeGroupToken, isValidGroupToken } from '../../services/group-token.js';
 import { response } from '../../utils.js';
 import { createJwt, createAuthCookie } from '../../services/auth.js';
 import { getGlobalConfig, saveGlobalConfig } from '../../repositories/admin/config-repository.js';
@@ -222,7 +223,8 @@ export async function handleProtectedAdminApiRequest(request, logger) {
     }
 
     if (!newGroup.token) newGroup.token = crypto.randomUUID();
-    if (!newGroup.token || typeof newGroup.token !== 'string' || !newGroup.token.trim()) {
+    newGroup.token = normalizeGroupToken(newGroup.token);
+    if (!isValidGroupToken(newGroup.token)) {
       logger.warn('Invalid group data', { GroupData: newGroup });
       return response.json({ error: 'Invalid group data' }, 400);
     }
@@ -239,14 +241,19 @@ export async function handleProtectedAdminApiRequest(request, logger) {
   });
 
   router.put('/admin/api/groups/:token', async ({ params }) => {
-    const token = params.token;
+    const normalizedToken = normalizeGroupToken(params.token);
     const groupData = await readJsonBody(request);
     if (!groupData || typeof groupData !== 'object' || Array.isArray(groupData)) {
-      logger.warn('Invalid group data', { GroupData: groupData, Token: token });
+      logger.warn('Invalid group data', { GroupData: groupData, Token: normalizedToken });
       return response.json({ error: 'Invalid group data' }, 400);
     }
 
-    groupData.token = token;
+    if (!isValidGroupToken(normalizedToken)) {
+      logger.warn('Invalid group data', { GroupData: groupData, Token: normalizedToken });
+      return response.json({ error: 'Invalid group data' }, 400);
+    }
+
+    groupData.token = normalizedToken;
     await saveGroup(groupData);
     logger.info('Group updated', { GroupName: groupData.name, Token: groupData.token }, { notify: true });
     return response.json(groupData);

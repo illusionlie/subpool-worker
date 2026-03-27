@@ -1,6 +1,7 @@
 import { ConfigService } from '../services/config.js';
 import { KVService } from '../services/kv.js';
 import { SubconverterService } from '../services/subconverter.js';
+import { normalizeGroupToken, isValidGroupToken } from '../services/group-token.js';
 import { response, isBot, serveAssetResponse } from '../utils.js';
 
 async function fetchDefaultPage(request, status, logger) {
@@ -14,13 +15,14 @@ async function fetchDefaultPage(request, status, logger) {
 }
 
 export async function handleSubscriptionRequest(request, token, logger) {
-  if (!token || token.length > 128 || token.includes('/')) {
+  const normalizedToken = normalizeGroupToken(token);
+  if (!isValidGroupToken(normalizedToken)) {
     // 无效的 token 格式，直接返回 400
     logger.warn('Invalid token format access attempt', { URL: request.url }, { notify: true });
     return response.normal('Invalid token format.', 400);
   }
 
-  const group = await KVService.getGroup(token);
+  const group = await KVService.getGroup(normalizedToken);
   if (!group) {
     logger.warn('Invalid token access attempt', { URL: request.url }, { notify: true });
     return fetchDefaultPage(request, 404, logger);

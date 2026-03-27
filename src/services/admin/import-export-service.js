@@ -1,4 +1,5 @@
 import { deepMerge } from '../config.js';
+import { normalizeGroupToken, isValidGroupToken } from '../group-token.js';
 import { getGlobalConfig } from '../../repositories/admin/config-repository.js';
 import { getAllGroups, saveGroup, deleteGroup } from '../../repositories/admin/group-repository.js';
 import {
@@ -70,13 +71,13 @@ function normalizeGroupForImport(rawGroup, groupIndex) {
   }
 
   const name = typeof rawGroup.name === 'string' ? rawGroup.name.trim() : '';
-  const token = typeof rawGroup.token === 'string' ? rawGroup.token.trim() : '';
+  const token = normalizeGroupToken(rawGroup.token);
 
   if (!name) {
     throw new Error(`Group name is required at index ${groupIndex}.`);
   }
 
-  if (!token || token.length > 128 || token.includes('/')) {
+  if (!isValidGroupToken(token)) {
     throw new Error(`Invalid token for group at index ${groupIndex}.`);
   }
 
