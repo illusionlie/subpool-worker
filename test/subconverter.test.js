@@ -175,23 +175,59 @@ test('`generateSubscription` 在 fresh TTL 内应命中缓存并避免重复请�
   }
 });
 
-test('`generateSubscription` 命中 stale 缓存时应先返回 stale 并后台刷新为新结果', async () => {
+test('`generateSubscription` 并发同 key 请求应复用 in-flight 构建', async () => {
+  SubconverterService.__clearResultCacheForTests();
+  const originalFetch = globalThis.fetch;
+  const logger = createLogger();
+  let fetchCallCount = 0;
+  let releaseFetch = () => {};
+  const fetchGate = new Promise(resolve => {
+    releaseFetch = resolve;
+  });
+
+  try {
+    await initConfig();
+
+    globalThis.fetch = async (input) => {
+      const fetchUrl = input instanceof Request ? input.url : input.toString();
+      if (fetchUrl.startsWith('https://converter.example/sub?')) {
+        fetchCallCount += 1;
+        await fetchGate;
+        return new Response('converted-concurrent', { status: 200 });
+      }
+      throw new Error(`Unexpected fetch URL: ${fetchUrl}`);
+    };
+
+    const group = createGroup();
+    const request = createRequest('https://example.com/sub/cache-token?clash');
+
+    const firstPromise = SubconverterService.generateSubscription(group, request, 'cache-token', logger);
+    const secondPromise = SubconverterService.generateSubscription(group, request, 'cache-token', logger);
+
+    releaseFetch();
+
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
+    assert.equal(fetchCallCount, 1);
+    assert.equal(first.content, 'converted-concurrent');
+    assert.equal(second.content, 'converted-concurrent');
+  } finally {
+    globalThis.fetch = originalFetch;
+    SubconverterService.__clearResultCacheForTests();
+  }
+});
+
+test('`generateSubscription` 缓存过期后应重新请求并更新结果', async () => {
   SubconverterService.__clearResultCacheForTests();
   const originalFetch = globalThis.fetch;
   const originalDateNow = Date.now;
   const logger = createLogger();
-  const pendingRefreshes = [];
   const cachePolicy = SubconverterService.__getCachePolicyForTests();
   let now = 1700001000000;
   let fetchCallCount = 0;
 
   try {
     Date.now = () => now;
-    await initConfig({
-      waitUntil(promise) {
-        pendingRefreshes.push(promise);
-      }
-    });
+    await initConfig();
 
     globalThis.fetch = async (input) => {
       const fetchUrl = input instanceof Request ? input.url : input.toString();
@@ -208,16 +244,9 @@ test('`generateSubscription` 命中 stale 缓存时应先返回 stale 并后台�
     const first = await SubconverterService.generateSubscription(group, request, 'cache-token', logger);
     assert.equal(first.content, 'converted-1');
 
-    now += cachePolicy.freshTtlMs + 1;
-    const staleResponse = await SubconverterService.generateSubscription(group, request, 'cache-token', logger);
-    assert.equal(staleResponse.content, 'converted-1');
-
-    assert.equal(pendingRefreshes.length, 1);
-    await pendingRefreshes[0];
-    assert.equal(fetchCallCount, 2);
-
-    const refreshedResponse = await SubconverterService.generateSubscription(group, request, 'cache-token', logger);
-    assert.equal(refreshedResponse.content, 'converted-2');
+    now += cachePolicy.ttlMs + 1;
+    const second = await SubconverterService.generateSubscription(group, request, 'cache-token', logger);
+    assert.equal(second.content, 'converted-2');
     assert.equal(fetchCallCount, 2);
   } finally {
     Date.now = originalDateNow;
@@ -226,70 +255,12 @@ test('`generateSubscription` 命中 stale 缓存时应先返回 stale 并后台�
   }
 });
 
-test('`generateSubscription` 在 stale 刷新失败时应继续返回 stale，不应被负缓存覆盖', async () => {
+test('`generateSubscription` subconverter 失败回退结果不应写入缓存', async () => {
   SubconverterService.__clearResultCacheForTests();
   const originalFetch = globalThis.fetch;
   const originalDateNow = Date.now;
   const logger = createLogger();
-  const pendingRefreshes = [];
-  const cachePolicy = SubconverterService.__getCachePolicyForTests();
   let now = 1700002000000;
-  let fetchCallCount = 0;
-
-  try {
-    Date.now = () => now;
-    await initConfig({
-      waitUntil(promise) {
-        pendingRefreshes.push(promise);
-      }
-    });
-
-    globalThis.fetch = async (input) => {
-      const fetchUrl = input instanceof Request ? input.url : input.toString();
-      if (fetchUrl.startsWith('https://converter.example/sub?')) {
-        fetchCallCount += 1;
-        if (fetchCallCount === 1) {
-          return new Response('converted-success', { status: 200 });
-        }
-        return new Response('upstream-failure', { status: 503 });
-      }
-      throw new Error(`Unexpected fetch URL: ${fetchUrl}`);
-    };
-
-    const group = createGroup();
-    const request = createRequest('https://example.com/sub/cache-token?clash');
-
-    const first = await SubconverterService.generateSubscription(group, request, 'cache-token', logger);
-    assert.equal(first.content, 'converted-success');
-
-    now += cachePolicy.freshTtlMs + 1;
-    const staleResponse = await SubconverterService.generateSubscription(group, request, 'cache-token', logger);
-    assert.equal(staleResponse.content, 'converted-success');
-    assert.equal(pendingRefreshes.length, 1);
-    await pendingRefreshes[0];
-    assert.equal(fetchCallCount, 2);
-
-    const staleAfterFailure = await SubconverterService.generateSubscription(group, request, 'cache-token', logger);
-    assert.equal(staleAfterFailure.content, 'converted-success');
-    assert.ok(staleAfterFailure.headers['Content-Disposition']);
-
-    assert.equal(pendingRefreshes.length, 2);
-    await pendingRefreshes[1];
-    assert.equal(fetchCallCount, 3);
-  } finally {
-    Date.now = originalDateNow;
-    globalThis.fetch = originalFetch;
-    SubconverterService.__clearResultCacheForTests();
-  }
-});
-
-test('`generateSubscription` 无 stale 时应使用短负缓存抑制重复失败请求', async () => {
-  SubconverterService.__clearResultCacheForTests();
-  const originalFetch = globalThis.fetch;
-  const originalDateNow = Date.now;
-  const logger = createLogger();
-  const cachePolicy = SubconverterService.__getCachePolicyForTests();
-  let now = 1700003000000;
   let fetchCallCount = 0;
 
   try {
@@ -311,14 +282,9 @@ test('`generateSubscription` 无 stale 时应使用短负缓存抑制重复失�
     const first = await SubconverterService.generateSubscription(group, request, 'cache-token', logger);
     const second = await SubconverterService.generateSubscription(group, request, 'cache-token', logger);
 
-    assert.equal(fetchCallCount, 1);
+    assert.equal(fetchCallCount, 2);
     assert.equal(atob(first.content), 'vmess://inline-node');
     assert.equal(second.content, first.content);
-
-    now += cachePolicy.negativeTtlMs + 1;
-    const third = await SubconverterService.generateSubscription(group, request, 'cache-token', logger);
-    assert.equal(fetchCallCount, 2);
-    assert.equal(third.content, first.content);
   } finally {
     Date.now = originalDateNow;
     globalThis.fetch = originalFetch;

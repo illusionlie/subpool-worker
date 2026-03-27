@@ -2,15 +2,13 @@ import { ConfigService } from './config.js';
 import { applyFilter, isValidBase64, safeBtoa } from '../utils.js';
 
 const SUBSCRIPTION_CACHE_POLICY = Object.freeze({
-  freshTtlMs: 60 * 1000,
-  swrTtlMs: 3 * 60 * 1000,
-  negativeTtlMs: 15 * 1000,
+  ttlMs: 60 * 1000,
   maxEntries: 512
 });
 
 export class SubconverterService {
   static _resultCache = new Map();
-  static _inFlightRefreshes = new Map();
+  static _inFlightBuilds = new Map();
 
   /**
    * 主方法：生成最终的订阅内容
@@ -30,19 +28,33 @@ export class SubconverterService {
     const now = Date.now();
     this._pruneExpiredCacheEntries(now);
 
-    const cacheState = this._getCacheState(cacheKey, now);
-    if (cacheState.state === 'fresh' && cacheState.entry) {
-      return this._clonePayload(cacheState.entry.payload);
+    const cachedPayload = this._getCachedPayload(cacheKey, now);
+    if (cachedPayload) {
+      return this._clonePayload(cachedPayload);
     }
 
-    const buildResult = () => this._buildSubscriptionResult(group, request, token, logger, outputFormat, url);
-
-    if (cacheState.state === 'stale' && cacheState.entry) {
-      this._refreshResultInBackground(cacheKey, buildResult, logger, cacheState.entry);
-      return this._clonePayload(cacheState.entry.payload);
+    const inFlightBuild = this._inFlightBuilds.get(cacheKey);
+    if (inFlightBuild) {
+      const inFlightResult = await inFlightBuild;
+      return this._clonePayload(inFlightResult.payload);
     }
 
-    return this._refreshResultBlocking(cacheKey, buildResult, logger);
+    const buildPromise = (async () => {
+      const result = await this._buildSubscriptionResult(group, request, token, logger, outputFormat, url);
+      if (result.shouldCache) {
+        this._setCacheEntry(cacheKey, result.payload);
+      }
+      return result;
+    })();
+
+    this._inFlightBuilds.set(cacheKey, buildPromise);
+
+    try {
+      const result = await buildPromise;
+      return this._clonePayload(result.payload);
+    } finally {
+      this._inFlightBuilds.delete(cacheKey);
+    }
   }
 
   static async _buildSubscriptionResult(group, request, token, logger, outputFormat, url) {
@@ -67,7 +79,7 @@ export class SubconverterService {
       const headers = this._createSubscriptionHeaders();
       return {
         payload: { content: safeBtoa(content), headers },
-        cacheStatus: 'positive'
+        shouldCache: true
       };
     }
 
@@ -83,7 +95,7 @@ export class SubconverterService {
       const headers = this._createSubscriptionHeaders();
       return {
         payload: { content: safeBtoa(''), headers },
-        cacheStatus: 'positive'
+        shouldCache: true
       };
     }
 
@@ -93,7 +105,7 @@ export class SubconverterService {
       const headers = this._createSubscriptionHeaders();
       return {
         payload: { content: safeBtoa(''), headers },
-        cacheStatus: 'positive'
+        shouldCache: true
       };
     }
 
@@ -109,121 +121,41 @@ export class SubconverterService {
       const headers = this._createSubscriptionHeaders(true);
       return {
         payload: { content: subContent, headers },
-        cacheStatus: 'positive'
+        shouldCache: true
       };
     } catch (error) {
       logger.error(error, { customMessage: 'Sub-converter fetch failed' });
-      // 转换失败时，回退到返回原生 base64 节点
+      // 转换失败时，回退到返回原生 base64 节点，不写入缓存
       const headers = this._createSubscriptionHeaders();
       return {
         payload: { content: safeBtoa(content), headers },
-        cacheStatus: 'negative'
+        shouldCache: false
       };
     }
   }
 
-  static async _refreshResultBlocking(cacheKey, buildResult, logger) {
-    const refreshPromise = this._ensureRefreshPromise(cacheKey, buildResult, logger, {
-      preserveStaleOnNegative: false,
-      staleEntry: null
-    });
-    const payload = await refreshPromise;
-    return this._clonePayload(payload);
-  }
-
-  static _refreshResultInBackground(cacheKey, buildResult, logger, staleEntry) {
-    const refreshPromise = this._ensureRefreshPromise(cacheKey, buildResult, logger, {
-      preserveStaleOnNegative: true,
-      staleEntry
-    });
-
-    const ctx = ConfigService.getCtx();
-    if (ctx && typeof ctx.waitUntil === 'function') {
-      ctx.waitUntil(refreshPromise.catch(() => {}));
-      return;
-    }
-
-    refreshPromise.catch(() => {});
-  }
-
-  static _ensureRefreshPromise(cacheKey, buildResult, logger, options) {
-    const inFlight = this._inFlightRefreshes.get(cacheKey);
-    if (inFlight) {
-      return inFlight;
-    }
-
-    const refreshPromise = (async () => {
-      const result = await buildResult();
-      const shouldPreserveStale = this._shouldPreserveStaleOnNegative(result, options);
-      if (!shouldPreserveStale) {
-        this._setCacheEntry(cacheKey, result.payload, result.cacheStatus);
-      }
-      return result.payload;
-    })();
-
-    const trackedPromise = refreshPromise
-      .catch(error => {
-        this._logCacheRefreshError(error, logger, cacheKey);
-        throw error;
-      })
-      .finally(() => {
-        this._inFlightRefreshes.delete(cacheKey);
-      });
-
-    this._inFlightRefreshes.set(cacheKey, trackedPromise);
-    return trackedPromise;
-  }
-
-  static _shouldPreserveStaleOnNegative(result, options) {
-    if (!options?.preserveStaleOnNegative) {
-      return false;
-    }
-
-    if (!result || result.cacheStatus !== 'negative') {
-      return false;
-    }
-
-    const staleEntry = options.staleEntry;
-    if (!staleEntry || staleEntry.status !== 'positive') {
-      return false;
-    }
-
-    return Date.now() <= staleEntry.staleUntil;
-  }
-
-  static _setCacheEntry(cacheKey, payload, cacheStatus) {
+  static _setCacheEntry(cacheKey, payload) {
     const now = Date.now();
-    const isNegative = cacheStatus === 'negative';
-    const freshUntil = now + (isNegative ? SUBSCRIPTION_CACHE_POLICY.negativeTtlMs : SUBSCRIPTION_CACHE_POLICY.freshTtlMs);
-    const staleUntil = now + (isNegative ? SUBSCRIPTION_CACHE_POLICY.negativeTtlMs : (SUBSCRIPTION_CACHE_POLICY.freshTtlMs + SUBSCRIPTION_CACHE_POLICY.swrTtlMs));
-
     this._resultCache.set(cacheKey, {
       payload: this._clonePayload(payload),
-      status: isNegative ? 'negative' : 'positive',
-      createdAt: now,
-      freshUntil,
-      staleUntil
+      expiresAt: now + SUBSCRIPTION_CACHE_POLICY.ttlMs
     });
 
     this._enforceCacheSizeLimit();
   }
 
-  static _getCacheState(cacheKey, now = Date.now()) {
+  static _getCachedPayload(cacheKey, now = Date.now()) {
     const entry = this._resultCache.get(cacheKey);
     if (!entry) {
-      return { state: 'miss', entry: null };
+      return null;
     }
 
-    if (now <= entry.freshUntil) {
-      return { state: 'fresh', entry };
+    if (now > entry.expiresAt) {
+      this._resultCache.delete(cacheKey);
+      return null;
     }
 
-    if (now <= entry.staleUntil) {
-      return { state: 'stale', entry };
-    }
-
-    this._resultCache.delete(cacheKey);
-    return { state: 'miss', entry: null };
+    return entry.payload;
   }
 
   static _createResultCacheKey(group, token, url, outputFormat) {
@@ -253,7 +185,7 @@ export class SubconverterService {
 
   static _pruneExpiredCacheEntries(now = Date.now()) {
     for (const [cacheKey, entry] of this._resultCache.entries()) {
-      if (now > entry.staleUntil) {
+      if (now > entry.expiresAt) {
         this._resultCache.delete(cacheKey);
       }
     }
@@ -269,15 +201,9 @@ export class SubconverterService {
     }
   }
 
-  static _logCacheRefreshError(error, logger, cacheKey) {
-    if (logger && typeof logger.error === 'function') {
-      logger.error(error, { customMessage: 'Subscription cache refresh failed', cacheKey });
-    }
-  }
-
   static __clearResultCacheForTests() {
     this._resultCache.clear();
-    this._inFlightRefreshes.clear();
+    this._inFlightBuilds.clear();
   }
 
   static __getCachePolicyForTests() {
