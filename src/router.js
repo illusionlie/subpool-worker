@@ -17,7 +17,7 @@ async function fetchAsset(request, env, logger, assetPath = null, status = null,
 
 export async function handleRequest(request, env, ctx, logger) {
   // 每次请求都初始化/加载最新的配置
-  await ConfigService.init(env);
+  await ConfigService.init(env, ctx);
 
   const url = new URL(request.url);
   const pathname = url.pathname;
