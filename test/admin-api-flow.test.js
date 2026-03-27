@@ -407,6 +407,70 @@ test('后台 API 流程：初始化 -> 登录 -> 配置保存 -> 组 CRUD', asyn
   assert.equal(await kv.get(`group:${groupToken}`, 'json'), null);
 });
 
+test('后台 API 流程：达到失败阈值当次应返回 429 并写入封禁状态', async () => {
+  const logger = createLogger();
+  const ctx = createCtx();
+  const { env, kv } = createEnv();
+
+  const authCookie = await initializeAdminSession({
+    env,
+    logger,
+    ctx,
+    password: 'ThresholdPass123'
+  });
+
+  const failedBanConfig = {
+    enabled: true,
+    maxAttempts: 3,
+    banDuration: 120,
+    failedAttemptsTtl: 120
+  };
+
+  const saveConfigResponse = await dispatchRequest('/admin/api/config', {
+    env,
+    logger,
+    ctx,
+    method: 'PUT',
+    headers: {
+      Cookie: authCookie
+    },
+    body: {
+      failedBan: failedBanConfig
+    }
+  });
+
+  assert.equal(saveConfigResponse.status, 200);
+
+  const loginIp = '198.51.100.24';
+
+  for (let index = 1; index <= failedBanConfig.maxAttempts; index += 1) {
+    const response = await dispatchRequest('/admin/api/login', {
+      env,
+      logger,
+      ctx,
+      method: 'POST',
+      headers: {
+        'cf-connecting-ip': loginIp
+      },
+      body: {
+        password: 'WrongPass'
+      }
+    });
+
+    if (index < failedBanConfig.maxAttempts) {
+      assert.equal(response.status, 401);
+      assert.equal((await response.json()).error, 'Invalid password');
+      continue;
+    }
+
+    assert.equal(response.status, 429);
+    assert.equal((await response.json()).error, 'Too many failed attempts, please try again later.');
+  }
+
+  assert.equal(await kv.get(`failedAttempts::${loginIp}`, 'json'), failedBanConfig.maxAttempts);
+  assert.equal(await kv.get(`banned::${loginIp}`, 'json'), true);
+});
+
 test('后台 API 流程：配置/订阅组 JSON 导出后可导入到新实例', async () => {
   const logger = createLogger();
   const ctx = createCtx();

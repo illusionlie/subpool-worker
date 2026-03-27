@@ -127,13 +127,16 @@ async function recordFailedLoginAttempt(request, failedBan, logger) {
 
   const ip = getLoginRequestIp(request);
   const attempts = await getFailedAttempts(ip) || 0;
-  if (attempts >= failedBan.maxAttempts) {
+  const nextAttempts = attempts + 1;
+
+  await saveFailedAttempts(ip, nextAttempts, failedBan.failedAttemptsTtl);
+
+  if (nextAttempts >= failedBan.maxAttempts) {
     await saveBannedState(ip, true, failedBan.banDuration);
     logger.warn('Banned IP attempted login', {}, { notify: true });
     return response.json({ error: 'Too many failed attempts, please try again later.' }, 429);
   }
 
-  await saveFailedAttempts(ip, attempts + 1, failedBan.failedAttemptsTtl);
   return null;
 }
 
