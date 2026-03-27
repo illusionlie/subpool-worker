@@ -210,8 +210,13 @@ export async function handleProtectedAdminApiRequest(request, logger) {
   });
 
   router.post('/admin/api/groups', async () => {
-    const newGroup = await request.json();
-    if (!newGroup || typeof newGroup.name !== 'string' || !newGroup.name.trim()) {
+    const newGroup = await readJsonBody(request);
+    if (!newGroup || typeof newGroup !== 'object' || Array.isArray(newGroup)) {
+      logger.warn('Invalid group data', { GroupData: newGroup });
+      return response.json({ error: 'Invalid group data' }, 400);
+    }
+
+    if (typeof newGroup.name !== 'string' || !newGroup.name.trim()) {
       logger.warn('Invalid group data', { GroupData: newGroup });
       return response.json({ error: 'Invalid group data' }, 400);
     }
@@ -235,7 +240,12 @@ export async function handleProtectedAdminApiRequest(request, logger) {
 
   router.put('/admin/api/groups/:token', async ({ params }) => {
     const token = params.token;
-    const groupData = await request.json();
+    const groupData = await readJsonBody(request);
+    if (!groupData || typeof groupData !== 'object' || Array.isArray(groupData)) {
+      logger.warn('Invalid group data', { GroupData: groupData, Token: token });
+      return response.json({ error: 'Invalid group data' }, 400);
+    }
+
     groupData.token = token;
     await saveGroup(groupData);
     logger.info('Group updated', { GroupName: groupData.name, Token: groupData.token }, { notify: true });
