@@ -44,60 +44,44 @@ export function hasConfiguredPbkdf2AdminPassword(config) {
   return hasConfiguredHashedAdminPassword(config) && adminPasswordHashIterations > 0;
 }
 
-export function hasConfiguredLegacySha256AdminPassword(config) {
+function hasConfiguredLegacySha256AdminPassword(config) {
   return hasConfiguredHashedAdminPassword(config) && !hasConfiguredPbkdf2AdminPassword(config);
 }
 
-export function getPersistedPasswordCredentialsState(config) {
-  if (hasConfiguredPbkdf2AdminPassword(config)) {
-    return {
-      hasHashedCredentials: true,
-      isPbkdf2: true,
-      isLegacySha256: false,
-      normalizedIterations: parseAdminPasswordHashIterations(config?.adminPasswordHashIterations)
-    };
-  }
-
-  if (hasConfiguredLegacySha256AdminPassword(config)) {
-    return {
-      hasHashedCredentials: true,
-      isPbkdf2: false,
-      isLegacySha256: true,
-      normalizedIterations: 0
-    };
-  }
-
-  return {
-    hasHashedCredentials: false,
-    isPbkdf2: false,
-    isLegacySha256: false,
-    normalizedIterations: 0
-  };
-}
-
 export function normalizePersistedAdminCredentialFields(config) {
-  const passwordCredentialsState = getPersistedPasswordCredentialsState(config);
-  if (!passwordCredentialsState.hasHashedCredentials) {
+  if (!config || typeof config !== 'object') {
     return config;
   }
 
-  config.adminPassword = '';
-
-  if (passwordCredentialsState.isPbkdf2) {
-    config.adminPasswordHashIterations = passwordCredentialsState.normalizedIterations;
-  } else {
-    delete config.adminPasswordHashIterations;
+  if (hasConfiguredPbkdf2AdminPassword(config)) {
+    config.adminPassword = '';
+    config.adminPasswordHashIterations = parseAdminPasswordHashIterations(config.adminPasswordHashIterations);
+    return config;
   }
 
+  if (hasConfiguredLegacyAdminPassword(config)) {
+    delete config.adminPasswordHash;
+    delete config.adminPasswordSalt;
+    delete config.adminPasswordHashIterations;
+    return config;
+  }
+
+  if (hasConfiguredLegacySha256AdminPassword(config)) {
+    config.adminPassword = '';
+    delete config.adminPasswordHashIterations;
+    return config;
+  }
+
+  delete config.adminPasswordHash;
+  delete config.adminPasswordSalt;
+  delete config.adminPasswordHashIterations;
   return config;
 }
 
-export function requiresAdminPasswordStorageUpgrade(config) {
-  return hasConfiguredLegacyAdminPassword(config) || hasConfiguredLegacySha256AdminPassword(config);
-}
-
 export function hasConfiguredAdminPassword(config) {
-  return hasConfiguredHashedAdminPassword(config) || hasConfiguredLegacyAdminPassword(config);
+  return hasConfiguredPbkdf2AdminPassword(config)
+    || hasConfiguredLegacyAdminPassword(config)
+    || hasConfiguredLegacySha256AdminPassword(config);
 }
 
 export function generateRandomHex(byteLength = 32) {
@@ -128,7 +112,7 @@ export function getRuntimeAdminCredentials() {
   });
 }
 
-export async function hashAdminPasswordWithLegacySha256(password, salt) {
+async function hashAdminPasswordWithLegacySha256(password, salt) {
   const normalizedPassword = typeof password === 'string' ? password.trim() : '';
   const normalizedSalt = typeof salt === 'string' ? salt.trim() : '';
   if (!normalizedPassword || !normalizedSalt) {
@@ -223,46 +207,71 @@ export async function isValidAdminPassword(password, config) {
   }
 
   const credentials = normalizeAdminCredentials(config);
-
-  if (hasConfiguredPbkdf2AdminPassword(credentials)) {
-    const computedHash = await hashAdminPasswordWithPbkdf2(
-      normalizedPassword,
-      credentials.adminPasswordSalt,
-      credentials.adminPasswordHashIterations
-    );
-    return Boolean(computedHash) && constantTimeCompare(computedHash, credentials.adminPasswordHash);
+  if (!hasConfiguredPbkdf2AdminPassword(credentials)) {
+    return false;
   }
 
-  if (hasConfiguredLegacySha256AdminPassword(credentials)) {
-    const computedHash = await hashAdminPasswordWithLegacySha256(normalizedPassword, credentials.adminPasswordSalt);
-    return Boolean(computedHash) && constantTimeCompare(computedHash, credentials.adminPasswordHash);
-  }
-
-  if (hasConfiguredLegacyAdminPassword(credentials)) {
-    return constantTimeCompare(normalizedPassword, credentials.adminPassword);
-  }
-
-  return false;
+  const computedHash = await hashAdminPasswordWithPbkdf2(
+    normalizedPassword,
+    credentials.adminPasswordSalt,
+    credentials.adminPasswordHashIterations
+  );
+  return Boolean(computedHash) && constantTimeCompare(computedHash, credentials.adminPasswordHash);
 }
 
-export async function migrateLegacyAdminPasswordStorageIfNeeded(password, logger) {
+async function persistMigratedAdminPassword(oldConfig, password, logger, logMessage) {
+  const passwordCredentials = await buildAdminPasswordCredentials(password);
+  const mergedConfig = deepMerge({}, oldConfig, passwordCredentials);
+  await saveGlobalConfig(mergedConfig);
+  await ConfigService.init(ConfigService.getEnv(), ConfigService.getCtx());
+  logger.warn(logMessage, {}, { notify: true });
+}
+
+export async function migrateAdminPasswordStorageIfNeeded({ logger, loginPassword = '' }) {
   const runtimeCredentials = getRuntimeAdminCredentials();
-  if (!requiresAdminPasswordStorageUpgrade(runtimeCredentials)) {
+  if (hasConfiguredPbkdf2AdminPassword(runtimeCredentials)) {
     return;
   }
 
-  try {
-    const oldConfig = await getGlobalConfig() || {};
-    if (!requiresAdminPasswordStorageUpgrade(oldConfig)) {
-      return;
-    }
+  const oldConfig = await getGlobalConfig() || {};
+  const storedCredentials = normalizeAdminCredentials(oldConfig);
 
-    const passwordCredentials = await buildAdminPasswordCredentials(password);
-    const mergedConfig = deepMerge({}, oldConfig, passwordCredentials);
-    await saveGlobalConfig(mergedConfig);
+  if (hasConfiguredPbkdf2AdminPassword(storedCredentials)) {
     await ConfigService.init(ConfigService.getEnv(), ConfigService.getCtx());
-    logger.warn('Legacy admin password storage upgraded to PBKDF2 hash.', {}, { notify: true });
-  } catch (err) {
-    logger.error(err, { customMessage: 'Failed to upgrade legacy admin password storage after login.' });
+    return;
   }
+
+  if (hasConfiguredLegacyAdminPassword(storedCredentials)) {
+    await persistMigratedAdminPassword(
+      oldConfig,
+      storedCredentials.adminPassword,
+      logger,
+      'Legacy plaintext admin password storage upgraded to PBKDF2 hash.'
+    );
+    return;
+  }
+
+  if (!hasConfiguredLegacySha256AdminPassword(storedCredentials)) {
+    return;
+  }
+
+  const normalizedLoginPassword = typeof loginPassword === 'string' ? loginPassword.trim() : '';
+  if (!normalizedLoginPassword) {
+    return;
+  }
+
+  const legacyHash = await hashAdminPasswordWithLegacySha256(
+    normalizedLoginPassword,
+    storedCredentials.adminPasswordSalt
+  );
+  if (!legacyHash || !constantTimeCompare(legacyHash, storedCredentials.adminPasswordHash)) {
+    return;
+  }
+
+  await persistMigratedAdminPassword(
+    oldConfig,
+    normalizedLoginPassword,
+    logger,
+    'Legacy SHA-256 admin password storage upgraded to PBKDF2 hash.'
+  );
 }

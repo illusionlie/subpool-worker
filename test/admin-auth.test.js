@@ -3,34 +3,24 @@ import assert from 'node:assert/strict';
 
 import { __adminInternals } from '../src/handlers/admin.js';
 import { KVService } from '../src/services/kv.js';
+import { ConfigService } from '../src/services/config.js';
 
 const {
-  hashAdminPasswordWithLegacySha256,
   hashAdminPasswordWithPbkdf2,
   isValidAdminPassword,
   normalizePersistedAdminCredentialFields,
-  getPersistedPasswordCredentialsState,
-  getBlockedLoginResponse
+  getBlockedLoginResponse,
+  migrateAdminPasswordStorageIfNeeded
 } = __adminInternals;
 
-test('legacy SHA-256 凭据应使用 legacy 分支通过校验', async () => {
-  const password = 'legacy-pass-123';
-  const salt = 'legacy-salt';
-  const legacyHash = await hashAdminPasswordWithLegacySha256(password, salt);
-
-  assert.ok(legacyHash, 'legacy hash should be generated');
-
-  const legacyCredentials = {
-    adminPasswordHash: legacyHash,
-    adminPasswordSalt: salt
+function createLogger() {
+  return {
+    info() {},
+    warn() {},
+    error() {},
+    fatal() {}
   };
-
-  const valid = await isValidAdminPassword(password, legacyCredentials);
-  const invalid = await isValidAdminPassword('wrong-password', legacyCredentials);
-
-  assert.equal(valid, true);
-  assert.equal(invalid, false);
-});
+}
 
 test('封禁 IP 应在密码校验前被短路，避免触发哈希计算', async () => {
   const originalKvGet = KVService.get;
@@ -38,12 +28,7 @@ test('封禁 IP 应在密码校验前被短路，避免触发哈希计算', asyn
   const queriedKeys = [];
   const blockedIp = '203.0.113.10';
 
-  const logger = {
-    info() {},
-    warn() {},
-    error() {},
-    fatal() {}
-  };
+  const logger = createLogger();
 
   try {
     KVService.get = async (key) => {
@@ -80,7 +65,7 @@ test('封禁 IP 应在密码校验前被短路，避免触发哈希计算', asyn
   }
 });
 
-test('PBKDF2 凭据应使用 PBKDF2 分支通过校验', async () => {
+test('PBKDF2 凭据应通过校验，错误口令应失败', async () => {
   const password = 'pbkdf2-pass-123';
   const salt = 'pbkdf2-salt';
   const iterations = 210000;
@@ -101,20 +86,96 @@ test('PBKDF2 凭据应使用 PBKDF2 分支通过校验', async () => {
   assert.equal(invalid, false);
 });
 
-test('normalizePersistedAdminCredentialFields 不应把 legacy SHA-256 凭据误标记为 PBKDF2', () => {
-  const mergedConfig = {
-    adminPassword: 'legacy-plain-should-be-cleared',
-    adminPasswordHash: 'legacy-hash',
-    adminPasswordSalt: 'legacy-salt',
+test('非 PBKDF2 凭据（legacy hash / 明文）应被拒绝', async () => {
+  const password = 'legacy-pass-123';
+
+  const legacyShaCredentials = {
+    adminPasswordHash: 'legacy-sha-hash',
+    adminPasswordSalt: 'legacy-salt'
+  };
+  const plainCredentials = {
+    adminPassword: password
+  };
+
+  assert.equal(await isValidAdminPassword(password, legacyShaCredentials), false);
+  assert.equal(await isValidAdminPassword(password, plainCredentials), false);
+});
+
+test('normalizePersistedAdminCredentialFields 应规范 PBKDF2 字段并保留 legacy SHA 凭据', () => {
+  const pbkdf2Config = {
+    adminPassword: 'should-be-cleared',
+    adminPasswordHash: 'pbkdf2-hash',
+    adminPasswordSalt: 'pbkdf2-salt',
+    adminPasswordHashIterations: '210000',
     telegram: { enabled: false }
   };
 
-  const normalized = normalizePersistedAdminCredentialFields({ ...mergedConfig });
-  const state = getPersistedPasswordCredentialsState(normalized);
+  const normalizedPbkdf2 = normalizePersistedAdminCredentialFields({ ...pbkdf2Config });
+  assert.equal(normalizedPbkdf2.adminPassword, '');
+  assert.equal(normalizedPbkdf2.adminPasswordHash, 'pbkdf2-hash');
+  assert.equal(normalizedPbkdf2.adminPasswordSalt, 'pbkdf2-salt');
+  assert.equal(normalizedPbkdf2.adminPasswordHashIterations, 210000);
 
-  assert.equal(normalized.adminPassword, '');
-  assert.equal(Object.hasOwn(normalized, 'adminPasswordHashIterations'), false);
-  assert.equal(state.hasHashedCredentials, true);
-  assert.equal(state.isLegacySha256, true);
-  assert.equal(state.isPbkdf2, false);
+  const legacyShaConfig = {
+    adminPassword: '',
+    adminPasswordHash: 'legacy-hash',
+    adminPasswordSalt: 'legacy-salt',
+    adminPasswordHashIterations: 0,
+    telegram: { enabled: false }
+  };
+
+  const normalizedLegacySha = normalizePersistedAdminCredentialFields({ ...legacyShaConfig });
+  assert.equal(normalizedLegacySha.adminPassword, '');
+  assert.equal(normalizedLegacySha.adminPasswordHash, 'legacy-hash');
+  assert.equal(normalizedLegacySha.adminPasswordSalt, 'legacy-salt');
+  assert.equal(Object.hasOwn(normalizedLegacySha, 'adminPasswordHashIterations'), false);
+});
+
+test('migrateAdminPasswordStorageIfNeeded 应在明文凭据下执行一次性迁移到 PBKDF2', async () => {
+  const originalGetGlobalConfig = KVService.getGlobalConfig;
+  const originalSaveGlobalConfig = KVService.saveGlobalConfig;
+
+  const env = {
+    KV: {
+      async get() {
+        return null;
+      },
+      async put() {
+        return undefined;
+      }
+    }
+  };
+
+  const ctx = { waitUntil() {} };
+  await ConfigService.init(env, ctx);
+
+  const logger = createLogger();
+  const oldConfig = {
+    adminPassword: 'LegacyPlainPass123',
+    telegram: { enabled: true }
+  };
+  const savedConfigs = [];
+
+  try {
+    KVService.getGlobalConfig = async () => oldConfig;
+    KVService.saveGlobalConfig = async (config) => {
+      savedConfigs.push(config);
+    };
+
+    await migrateAdminPasswordStorageIfNeeded({ logger });
+
+    assert.equal(savedConfigs.length, 1);
+    const migrated = savedConfigs[0];
+    assert.equal(migrated.adminPassword, '');
+    assert.equal(typeof migrated.adminPasswordHash, 'string');
+    assert.equal(typeof migrated.adminPasswordSalt, 'string');
+    assert.equal(typeof migrated.adminPasswordHashIterations, 'number');
+    assert.equal(migrated.telegram.enabled, true);
+
+    const migratedPasswordMatched = await isValidAdminPassword('LegacyPlainPass123', migrated);
+    assert.equal(migratedPasswordMatched, true);
+  } finally {
+    KVService.getGlobalConfig = originalGetGlobalConfig;
+    KVService.saveGlobalConfig = originalSaveGlobalConfig;
+  }
 });

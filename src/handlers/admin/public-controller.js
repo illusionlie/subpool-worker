@@ -16,7 +16,7 @@ import {
   getRuntimeAdminCredentials,
   buildAdminPasswordCredentials,
   isValidAdminPassword,
-  migrateLegacyAdminPasswordStorageIfNeeded,
+  migrateAdminPasswordStorageIfNeeded,
   constantTimeCompare
 } from '../../services/admin/credential-service.js';
 import {
@@ -143,7 +143,6 @@ async function recordFailedLoginAttempt(request, failedBan, logger) {
 async function handleLogin(request, logger) {
   const payload = await readJsonBody(request);
   const password = typeof payload?.password === 'string' ? payload.password.trim() : '';
-  const adminCredentials = getRuntimeAdminCredentials();
   const jwtSecret = await getOrCreateJwtSecretForInitializedAdmin(logger);
   const failedBan = ConfigService.get('failedBan');
 
@@ -168,6 +167,8 @@ async function handleLogin(request, logger) {
 
   let passwordMatched;
   try {
+    await migrateAdminPasswordStorageIfNeeded({ logger, loginPassword: password });
+    const adminCredentials = getRuntimeAdminCredentials();
     passwordMatched = await isValidAdminPassword(password, adminCredentials);
   } catch (err) {
     logger.error(err, { customMessage: 'Failed to validate admin password hash during login.' });
@@ -175,7 +176,6 @@ async function handleLogin(request, logger) {
   }
 
   if (passwordMatched) {
-    await migrateLegacyAdminPasswordStorageIfNeeded(password, logger);
     const token = await createJwt(jwtSecret, {}, logger);
     const cookie = createAuthCookie(token, 8 * 60 * 60);
     logger.info('Admin logged in', {}, { notify: true });

@@ -5,7 +5,6 @@ import { createJwt, createAuthCookie } from '../../services/auth.js';
 import { getGlobalConfig, saveGlobalConfig } from '../../repositories/admin/config-repository.js';
 import { getGroup, getAllGroups, saveGroup, deleteGroup } from '../../repositories/admin/group-repository.js';
 import {
-  requiresAdminPasswordStorageUpgrade,
   hasConfiguredAdminPassword,
   getRuntimeAdminCredentials,
   buildAdminPasswordCredentials,
@@ -131,7 +130,6 @@ export async function handleProtectedAdminApiRequest(request, logger) {
 
     let passwordChanged = false;
     const currentAdminCredentials = getRuntimeAdminCredentials();
-    const passwordStorageUpgradeRequired = requiresAdminPasswordStorageUpgrade(currentAdminCredentials);
 
     if ('adminPassword' in newConfig) {
       const nextPassword = typeof newConfig.adminPassword === 'string'
@@ -156,8 +154,7 @@ export async function handleProtectedAdminApiRequest(request, logger) {
         passwordChanged = !hasConfiguredAdminPassword(currentAdminCredentials)
           || !passwordMatched;
 
-        const shouldPersistPasswordCredentials = passwordChanged || passwordStorageUpgradeRequired;
-        if (shouldPersistPasswordCredentials) {
+        if (passwordChanged) {
           let passwordCredentials;
           try {
             passwordCredentials = await buildAdminPasswordCredentials(nextPassword);

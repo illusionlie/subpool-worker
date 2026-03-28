@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 
+import { createJwt } from '../src/services/auth.js';
 import { handleRequest } from '../src/router.js';
 
 class InMemoryKV {
@@ -126,6 +128,12 @@ function createEnv(initialGlobalConfig = null) {
       DEBUG_SECRET: 'debug-secret'
     }
   };
+}
+
+function buildLegacySha256Hash(password, salt) {
+  return createHash('sha256')
+    .update(`${salt}:${password}`)
+    .digest('hex');
 }
 
 async function dispatchRequest(path, {
@@ -405,6 +413,78 @@ test('后台 API 流程：初始化 -> 登录 -> 配置保存 -> 组 CRUD', asyn
 
   assert.deepEqual(await kv.get('groups:index', 'json'), []);
   assert.equal(await kv.get(`group:${groupToken}`, 'json'), null);
+});
+
+test('后台 API 流程：legacy SHA 凭据在保存配置后不应丢失，且可在登录时迁移到 PBKDF2', async () => {
+  const logger = createLogger();
+  const ctx = createCtx();
+
+  const legacyPassword = 'LegacyShaPass123';
+  const legacySalt = 'legacy-salt';
+  const jwtSecret = 'legacy-jwt-secret';
+  const legacyHash = buildLegacySha256Hash(legacyPassword, legacySalt);
+
+  const { env, kv } = createEnv({
+    adminPassword: '',
+    adminPasswordHash: legacyHash,
+    adminPasswordSalt: legacySalt,
+    jwtSecret,
+    telegram: {
+      enabled: false,
+      botToken: 'legacy-bot-token',
+      chatId: ''
+    }
+  });
+
+  const legacyToken = await createJwt(jwtSecret, {}, logger);
+
+  const saveConfigResponse = await dispatchRequest('/admin/api/config', {
+    env,
+    logger,
+    ctx,
+    method: 'PUT',
+    headers: {
+      Cookie: `auth_token=${legacyToken}`
+    },
+    body: {
+      telegram: {
+        enabled: true,
+        chatId: '10010'
+      }
+    }
+  });
+
+  assert.equal(saveConfigResponse.status, 200);
+  assert.deepEqual(await saveConfigResponse.json(), {
+    success: true,
+    passwordChanged: false
+  });
+
+  const configAfterSave = await kv.get('config:global', 'json');
+  assert.equal(configAfterSave.adminPasswordHash, legacyHash);
+  assert.equal(configAfterSave.adminPasswordSalt, legacySalt);
+  assert.equal(Object.hasOwn(configAfterSave, 'adminPasswordHashIterations'), false);
+
+  const loginResponse = await dispatchRequest('/admin/api/login', {
+    env,
+    logger,
+    ctx,
+    method: 'POST',
+    body: {
+      password: legacyPassword
+    }
+  });
+
+  assert.equal(loginResponse.status, 200);
+  assert.equal((await loginResponse.json()).success, true);
+
+  const configAfterLogin = await kv.get('config:global', 'json');
+  assert.equal(configAfterLogin.adminPassword, '');
+  assert.equal(typeof configAfterLogin.adminPasswordHash, 'string');
+  assert.equal(configAfterLogin.adminPasswordHash !== legacyHash, true);
+  assert.equal(typeof configAfterLogin.adminPasswordSalt, 'string');
+  assert.equal(typeof configAfterLogin.adminPasswordHashIterations, 'number');
+  assert.equal(configAfterLogin.adminPasswordHashIterations > 0, true);
 });
 
 test('后台 API 流程：创建/更新订阅组应拒绝订阅端不可访问的非法 token', async () => {
