@@ -75,64 +75,6 @@ export function applyFilter(content, filterConfig, logger = null) {
     .join('\n');
 }
 
-// 阻止的 UA 列表
-const BOT_UA_PATTERNS = new RegExp([
-  'bot',        // Bot 通杀
-  'spider',
-  'crawler',
-  'slurp',      // Yahoo
-  'ia_archiver',
-  'sogou',
-  'facebook',
-  'pinterest',
-  'ChatGPT-User',
-  'QQ',          // QQ
-  'MicroMessenger', // 微信
-  'request',     // 一些简单的爬虫
-  'wget'
-].join('|'), 'i');
-
-/**
- * 判断是否为机器人访问
- * @param {Request} request - 请求对象
- * @returns {object} 包含分数和是否为机器人的对象
- */
-export function isBot(request) {
-  let score = 0;
-
-  // 检查 User-Agent
-  const userAgent = request.headers.get('User-Agent') || '';
-  if (!userAgent) score += 30;
-  if (BOT_UA_PATTERNS.test(userAgent)) score += 50;
-  if (!userAgent.includes('Mozilla/5.0') && !(/Chrome|Safari|Firefox|Edg|v2rayN|Clash|sing-box|mihomo|xray/).test(userAgent)) score += 10;
-
-  // 检查 HTTP 版本
-  const httpVersion = request.cf?.httpProtocol || '';
-  if (httpVersion == 'HTTP/1.0') score += 50;
-
-  // 检查 TLS 版本
-  const tlsVersion = request.cf?.tlsVersion || '';
-  if (!tlsVersion || tlsVersion == 'TLSv1.0' || tlsVersion == 'TLSv1.1') score += 50;
-
-  // 检查 sec-fetch-*
-  const secSite = request.headers.get('sec-fetch-site') || '';
-  const secMode = request.headers.get('sec-fetch-mode') || '';
-  const secDest = request.headers.get('sec-fetch-dest') || '';
-  const secUser = request.headers.get('sec-fetch-user') || '';
-  if (!secSite || secMode !== 'navigate' || secDest !== 'document' || !secUser) score += 20;
-
-  // 检查 Accept
-  const accept = request.headers.get('Accept') || '';
-  if (!accept.includes('text/html') || accept.length < 10) score += 10;
-
-  // 赦免 subconverter 的回调
-  const subconverterVersion = request.headers.get('subconverter-version') || '';
-  const subconverterRequest = request.headers.get('subconverter-request') || '';
-  if (subconverterRequest === '1' && subconverterVersion && userAgent.includes('subconverter')) score -= 10;
-
-  return { score, ifBot: score >= 50 };
-}
-
 
 export function createAssetRequest(request, assetPath = null) {
   const assetUrl = new URL(request.url);

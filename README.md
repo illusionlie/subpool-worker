@@ -19,7 +19,7 @@
 - **管理后台**：首次初始化、登录鉴权、会话续期、配置管理、订阅组 CRUD
 - **登录失败防护**：基于 IP 的失败计数与临时封禁
 - **数据备份**：支持配置与订阅组 JSON 导入/导出（带回滚保护）
-- **访问防护**：可按组限制中国大陆访问，可全局启用基础 bot 检测拦截
+- **访问防护**：可按组限制中国大陆访问
 - **日志与通知**：结构化日志 + Telegram 通知；支持 `X-Debug-Log` 临时提升日志输出
 
 ---
@@ -60,7 +60,7 @@ public/
 src/
 ├── index.js                         # Worker fetch 入口
 ├── router.js                        # 总路由
-├── utils.js                         # 过滤、bot 检测、响应头封装、静态资源封装
+├── utils.js                         # 过滤、响应头封装、静态资源封装
 ├── handlers/
 │   ├── admin.js                     # 管理模块导出 + 测试白盒导出
 │   ├── subscription.js              # /sub/:token 处理
@@ -258,7 +258,6 @@ node --test test/admin-auth.test.js --test-name-pattern "<case-name>"
 ### 访问控制
 
 - 每个订阅组可配置是否允许中国大陆访问
-- 全局可开启 bot 拦截（UA + 请求特征评分）
 
 ---
 
@@ -299,7 +298,6 @@ node --test test/admin-auth.test.js --test-name-pattern "<case-name>"
 
 来自 [`src/services/config.js`](src/services/config.js) 默认配置：
 
-- `blockBots`：是否拦截 bot
 - `fileName`：转换产物下载文件名
 - `subUpdateTime`：`Profile-Update-Interval`
 - `subscriptionInfo.totalTB / expireDate`：`Subscription-Userinfo`

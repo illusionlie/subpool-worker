@@ -44,7 +44,6 @@ function createRequest(url) {
 
 async function initConfig(ctx = { waitUntil() {} }, overrides = {}) {
   const config = {
-    blockBots: false,
     fileName: 'cache-test-file',
     subconverter: {
       protocol: 'https',

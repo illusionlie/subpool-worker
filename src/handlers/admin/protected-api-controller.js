@@ -128,6 +128,10 @@ export async function handleProtectedAdminApiRequest(request, logger) {
       delete newConfig.adminPasswordHashIterations;
     }
 
+    if ('blockBots' in newConfig) {
+      delete newConfig.blockBots;
+    }
+
     let passwordChanged = false;
     const currentAdminCredentials = getRuntimeAdminCredentials();
 
@@ -179,6 +183,11 @@ export async function handleProtectedAdminApiRequest(request, logger) {
 
     const oldConfig = await getGlobalConfig() || {};
     const mergedConfig = normalizePersistedAdminCredentialFields(deepMerge({}, oldConfig, newConfig));
+
+    if (Object.hasOwn(mergedConfig, 'blockBots')) {
+      delete mergedConfig.blockBots;
+    }
+
     await saveGlobalConfig(mergedConfig);
 
     const responseHeaders = {};

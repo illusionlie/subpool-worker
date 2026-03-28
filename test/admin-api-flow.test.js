@@ -680,7 +680,6 @@ test('后台 API 流程：配置/订阅组 JSON 导出后可导入到新实例',
     },
     body: {
       fileName: 'export-file-name',
-      blockBots: false,
       telegram: {
         enabled: true,
         chatId: '123456789'
@@ -866,7 +865,6 @@ test('后台 API 流程：配置/订阅组 JSON 导出后可导入到新实例',
   assert.equal(importedConfigResponse.status, 200);
   const importedConfig = await importedConfigResponse.json();
   assert.equal(importedConfig.fileName, 'export-file-name');
-  assert.equal(importedConfig.blockBots, false);
   assert.equal(importedConfig.telegram.enabled, true);
   assert.equal(importedConfig.telegram.chatId, '123456789');
   assert.equal(importedConfig.telegram.botToken, 'source-bot-token');

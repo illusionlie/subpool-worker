@@ -2,7 +2,7 @@ import { ConfigService } from '../services/config.js';
 import { KVService } from '../services/kv.js';
 import { SubconverterService } from '../services/subconverter.js';
 import { normalizeGroupToken, isValidGroupToken } from '../services/group-token.js';
-import { response, isBot, serveAssetResponse } from '../utils.js';
+import { response, serveAssetResponse } from '../utils.js';
 
 async function fetchDefaultPage(request, status, logger) {
   return serveAssetResponse(request, ConfigService.getEnv().ASSETS, '/index.html', logger, {
@@ -28,20 +28,13 @@ export async function handleSubscriptionRequest(request, token, logger) {
     return fetchDefaultPage(request, 404, logger);
   }
 
-  const config = ConfigService.get();
   const country = request.cf?.country || 'XX'; // 'XX' for unknown
   if (country === 'CN' && !group.allowChinaAccess) {
     logger.warn('Blocked China access attempt', { UserAgent: request.headers.get('User-Agent'), URL: request.url }, { notify: true });
     return fetchDefaultPage(request, 403, logger);
   }
 
-  const { score, ifBot } = isBot(request);
-  if (config.blockBots && ifBot) {
-    logger.info('Blocked bot access attempt', { UserAgent: request.headers.get('User-Agent'), URL: request.url, Score: score });
-    return fetchDefaultPage(request, 403, logger);
-  }
-
-  logger.info('Subscription accessed', { token, groupName: group.name, Score: score });
+  logger.info('Subscription accessed', { token, groupName: group.name });
 
   try {
     const { content, headers } = await SubconverterService.generateSubscription(group, request, token, logger);

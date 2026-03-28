@@ -21,6 +21,7 @@ export function sanitizeConfigForResponse(config) {
   delete safeConfig.adminPasswordSalt;
   delete safeConfig.adminPasswordHashIterations;
   delete safeConfig.jwtSecret;
+  delete safeConfig.blockBots;
   return safeConfig;
 }
 
@@ -31,6 +32,7 @@ export function sanitizeConfigForImport(config) {
   delete sanitizedConfig.adminPasswordSalt;
   delete sanitizedConfig.adminPasswordHashIterations;
   delete sanitizedConfig.jwtSecret;
+  delete sanitizedConfig.blockBots;
   return sanitizedConfig;
 }
 
@@ -132,6 +134,10 @@ export async function buildMergedConfigForImport(importedConfig) {
   const mergedConfig = normalizePersistedAdminCredentialFields(
     deepMerge({}, currentConfig, importedConfig)
   );
+
+  if (Object.hasOwn(mergedConfig, 'blockBots')) {
+    delete mergedConfig.blockBots;
+  }
 
   if (hasConfiguredAdminPassword(mergedConfig) && !hasConfiguredJwtSecret(mergedConfig)) {
     mergedConfig.jwtSecret = generateJwtSecret();

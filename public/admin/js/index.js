@@ -410,7 +410,6 @@ const App = {
     const form = document.getElementById('settings-form');
     const newConfig = {
       adminPassword: form.elements['admin-password'].value || undefined,
-      blockBots: form.elements['block-bots'].checked,
       failedBan: {
         enabled: form.elements['failed-ban-enabled'].checked,
         maxAttempts: Number.parseInt(form.elements['failed-ban-max-attempts'].value, 10) || 5,
@@ -720,10 +719,6 @@ const App = {
                 <div class="form-group">
                   <label for="admin-password">管理密码 (留空则不修改)</label>
                   <input type="password" id="admin-password" placeholder="输入新密码">
-                </div>
-                <div class="form-group checkbox-group">
-                  <input type="checkbox" id="block-bots" ${cfg.blockBots ? 'checked' : ''}>
-                  <label for="block-bots">阻止常见爬虫/机器人访问</label>
                 </div>
               </fieldset>
               <fieldset>
