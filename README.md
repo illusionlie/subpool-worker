@@ -275,7 +275,6 @@ node --test test/admin-auth.test.js --test-name-pattern "<case-name>"
 | POST | `/admin/api/groups` | 是 | 创建订阅组 |
 | PUT | `/admin/api/groups/:token` | 是 | 更新订阅组 |
 | DELETE | `/admin/api/groups/:token` | 是 | 删除订阅组 |
-| GET | `/admin/api/utils/gentoken` | 是 | 生成随机 token |
 | GET | `/admin/api/export` | 是 | 导出配置+订阅组 |
 | POST | `/admin/api/import` | 是 | 导入配置+订阅组（失败回滚） |
 

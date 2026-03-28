@@ -272,8 +272,6 @@ export async function handleProtectedAdminApiRequest(request, logger) {
     return response.json({ success: true });
   });
 
-  router.get('/admin/api/utils/gentoken', () => response.json({ token: crypto.randomUUID() }));
-
   const routerResponse = await router.fetch(request);
   if (routerResponse) {
     return routerResponse;

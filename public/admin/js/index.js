@@ -191,7 +191,7 @@ const App = {
     },
 
     generateToken() {
-      return this.request('/utils/gentoken');
+      return Promise.resolve({ token: crypto.randomUUID() });
     },
 
     logout() {
