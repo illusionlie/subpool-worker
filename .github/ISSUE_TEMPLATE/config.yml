@@ -1,0 +1,11 @@
+# Issue 模板配置
+# 空白 Issue 仍允许创建,但鼓励使用对应模板。
+
+blank_issues_enabled: true
+contact_links:
+  - name: 📖 项目文档
+    url: https://github.com/illusionlie/subpool-worker/blob/main/README.md
+    about: 部署、API、KV 结构、配置项说明请先查阅 README。
+  - name: 💬 使用讨论
+    url: https://github.com/illusionlie/subpool-worker/discussions
+    about: 非缺陷、非功能请求的开放性讨论请发到 Discussions。

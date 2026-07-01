@@ -1,0 +1,79 @@
+name: 🚀 部署与配置问题
+description: 部署、wrangler.toml、KV 绑定或 init 流程遇到问题
+title: "[Deploy] "
+labels: ["deploy", "question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        部署相关问题往往与本地配置有关。请先核对:
+
+        - `wrangler.toml` 已从 `wrangler.toml.example` 复制并替换全部占位符
+        - KV 命名空间已创建且 ID 正确填写
+        - Node.js 版本 ≥ 18(建议与 CI 对齐使用 22)
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: 卡在哪个环节
+      options:
+        - npm install / npm ci
+        - 本地 dev (wrangler dev)
+        - 构建 (npm run build / dry-run)
+        - 正式部署 (wrangler deploy)
+        - 首次初始化 (/admin/api/init)
+        - 登录 / 会话
+        - KV 数据读写
+        - CI (generate-test.yml)
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: 报错信息
+      description: 贴出完整的命令输出或浏览器报错(请隐去密钥)。
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: 配置情况(脱敏)
+      description: |
+        贴出 `wrangler.toml` 相关片段,**务必隐藏**以下敏感值:
+        - KV namespace id
+        - DEBUG_SECRET / INIT_SECRET
+        - 任何 token、密码
+      placeholder: |
+        name = "****"
+        [[kv_namespaces]]
+        binding = "KV"
+        id = "****"
+
+  - type: input
+    id: wrangler-version
+    attributes:
+      label: wrangler 版本
+      placeholder: "npx wrangler --version"
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js 版本
+      placeholder: "node --version"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已对照 README「快速开始」核对配置
+          required: true
+        - label: 我已隐藏所有密钥、Token、KV ID 等敏感信息
+          required: true
