@@ -68,7 +68,7 @@ test('封禁 IP 应在密码校验前被短路，避免触发哈希计算', asyn
 test('PBKDF2 凭据应通过校验，错误口令应失败', async () => {
   const password = 'pbkdf2-pass-123';
   const salt = 'pbkdf2-salt';
-  const iterations = 210000;
+  const iterations = 100000;
 
   const pbkdf2Hash = await hashAdminPasswordWithPbkdf2(password, salt, iterations);
   assert.ok(pbkdf2Hash, 'pbkdf2 hash should be generated');
@@ -101,12 +101,28 @@ test('非 PBKDF2 凭据（legacy hash / 明文）应被拒绝', async () => {
   assert.equal(await isValidAdminPassword(password, plainCredentials), false);
 });
 
+test('hashAdminPasswordWithPbkdf2 超过平台最大迭代次数时应返回空串而非抛出异常', async () => {
+  const result = await hashAdminPasswordWithPbkdf2('password', 'salt', 210000);
+  assert.equal(result, '');
+});
+
+test('isValidAdminPassword 对超过平台迭代上限的凭据应返回 false 而非抛出异常', async () => {
+  const overLimitCredentials = {
+    adminPasswordHash: 'some-hash',
+    adminPasswordSalt: 'some-salt',
+    adminPasswordHashIterations: 210000
+  };
+
+  const result = await isValidAdminPassword('any-password', overLimitCredentials);
+  assert.equal(result, false);
+});
+
 test('normalizePersistedAdminCredentialFields 应规范 PBKDF2 字段并保留 legacy SHA 凭据', () => {
   const pbkdf2Config = {
     adminPassword: 'should-be-cleared',
     adminPasswordHash: 'pbkdf2-hash',
     adminPasswordSalt: 'pbkdf2-salt',
-    adminPasswordHashIterations: '210000',
+    adminPasswordHashIterations: '100000',
     telegram: { enabled: false }
   };
 
@@ -114,7 +130,7 @@ test('normalizePersistedAdminCredentialFields 应规范 PBKDF2 字段并保留 l
   assert.equal(normalizedPbkdf2.adminPassword, '');
   assert.equal(normalizedPbkdf2.adminPasswordHash, 'pbkdf2-hash');
   assert.equal(normalizedPbkdf2.adminPasswordSalt, 'pbkdf2-salt');
-  assert.equal(normalizedPbkdf2.adminPasswordHashIterations, 210000);
+  assert.equal(normalizedPbkdf2.adminPasswordHashIterations, 100000);
 
   const legacyShaConfig = {
     adminPassword: '',

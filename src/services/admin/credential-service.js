@@ -5,7 +5,14 @@ const LEGACY_PASSWORD_HASH_ALGORITHM = 'SHA-256';
 const PASSWORD_DERIVATION_ALGORITHM = 'PBKDF2';
 const PASSWORD_DERIVATION_HASH = 'SHA-256';
 const PASSWORD_SALT_BYTE_LENGTH = 16;
-const PASSWORD_HASH_ITERATIONS = 210000;
+
+// Cloudflare Workers (workerd) hard-caps PBKDF2 iterations at 100 000 to
+// prevent CPU DoS.  Any value above that causes:
+//   [ERROR] Pbkdf2 failed: iteration counts above 100000 are not supported
+// See https://github.com/cloudflare/workerd/issues/1346
+const PBKDF2_MAX_ALLOWED_ITERATIONS = 100000;
+const PASSWORD_HASH_ITERATIONS = PBKDF2_MAX_ALLOWED_ITERATIONS;
+
 const PASSWORD_HASH_BIT_LENGTH = 256;
 const textEncoder = new TextEncoder();
 
@@ -133,6 +140,10 @@ export async function hashAdminPasswordWithPbkdf2(password, salt, iterations = P
   const normalizedIterations = parseAdminPasswordHashIterations(iterations);
 
   if (!normalizedPassword || !normalizedSalt || normalizedIterations <= 0) {
+    return '';
+  }
+
+  if (normalizedIterations > PBKDF2_MAX_ALLOWED_ITERATIONS) {
     return '';
   }
 
